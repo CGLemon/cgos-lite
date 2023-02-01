@@ -1,7 +1,10 @@
+import time
+
 class ClientStatus:
     def __init__(self, sock):
         self.name = None
         self.sock = sock
+        self.fid = sock.fileno()
         self.support_analysis = False
 
     def fetch_status(self):
@@ -36,3 +39,18 @@ class ClientStatus:
     def send_and_receive(self, msg):
         self.send(msg)
         return self.receive()
+
+
+def match_loop(ready_queue, finished_queue):
+    while True:
+        try:
+            black, white = ready_queue.get()
+        except queue.Empty:
+            time.sleep(1)
+            continue
+
+
+        # do the match game ....
+
+        finished_queue.put((black, white))
+
