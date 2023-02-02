@@ -8,8 +8,6 @@ import multiprocessing as mp
 import config
 from match import ClientStatus
 
-
-
 def master_loop():
     clients_pool = dict()
     ready_queue = mp.Queue()
