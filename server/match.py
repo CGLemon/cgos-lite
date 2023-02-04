@@ -3,8 +3,11 @@ import config
 import threading
 import datetime
 import queue
+import json
+import os
 
 import board as brd
+from sgf import make_sgf
 
 class ClientStatus:
     def __init__(self):
@@ -118,7 +121,7 @@ class ClientStatus:
         self.send(msg)
         return self.receive()
 
-def play_match_game(black, white, setting):
+def play_match_game(black, white, game_id, setting):
     def color_to_char(c):
         if c == brd.BLACK:
             return 'b'
@@ -137,7 +140,6 @@ def play_match_game(black, white, setting):
             tokens = move.split(None, 1)
             move = tokens[0]
             if len(tokens) > 1:
-                # analysis = re.sub("[^- 0-9a-zA-Z._-]", "", tokens[1])
                 try:
                     info = json.loads(tokens[1])
                     analysis = json.dumps(info, indent=None, separators=(",", ":"))
@@ -167,6 +169,8 @@ def play_match_game(black, white, setting):
         brd.BLACK : black,
         brd.WHITE : white
     }
+
+    history = list() # move, time_left and analysis
 
     for player in players.values():
         player.create_sockfile()
@@ -226,7 +230,7 @@ def play_match_game(black, white, setting):
 
             is_legal = board.play(vertex)
 
-            if not is_legal or board.superko():
+            if not is_legal or (vertex != brd.PASS and board.superko()):
                 # Game ended by illegal move.
                 winner = opp_to_move
                 result_status["winner"] = winner
@@ -235,6 +239,9 @@ def play_match_game(black, white, setting):
                                             color_to_char(winner).upper()
                                         )
                 break    
+
+            history.append((move, int(time_left), analysis))
+
 
             time_left = time_lefts[opp_to_move]
             opp_player = players[opp_to_move]
@@ -270,18 +277,36 @@ def play_match_game(black, white, setting):
         result_status["type"] = "no result"
         result_status["info"] = "0"
 
-    dte = ctime.strftime("%Y-%m-%d")
-    sc = result_status["info"]
+    date = ctime.strftime("%Y-%m-%d")
+    result = result_status["info"]
     err = str()
 
-    black.request_gameover(dte, sc, err)
-    white.request_gameover(dte, sc, err)
+    black.request_gameover(date, result, err)
+    white.request_gameover(date, result, err)
 
     for player in players.values():
         player.close_sockfile()
 
-    print("Current match game is over")
-    # TODO: Save the SGF file.
+
+    # Save the sgf file.
+    sgf = make_sgf(
+              board.board_size,
+              board.komi,
+              black.name,
+              white.name,
+              setting["main_time"],
+              date,
+              result,
+              history
+          )
+
+    sgf_path = os.path.join(*config.SGF_DIR_PATH)
+    if not os.path.isdir(sgf_path):
+        os.mkdir(sgf_path)
+
+    with open(os.path.join(sgf_path, "{}.sgf".format(game_id)), 'w') as f:
+        f.write(sgf)
+
 
 def match_loop(ready_queue, finished_queue):
     match_threads = dict()
@@ -290,7 +315,7 @@ def match_loop(ready_queue, finished_queue):
         finished_ids = list()
         for k, v in match_threads.items():
             # Collect all finished match games.
-            t, _, _ = v
+            t, _, _, _ = v
             if not t.is_alive():
                 finished_ids.append(k)
 
@@ -298,9 +323,15 @@ def match_loop(ready_queue, finished_queue):
             # The match game is game over. Push the play
             # back to main pooling.
             v = match_threads.pop(i)
-            t, b, w = v
+            t, b, w, i = v
             t.join()
-            finished_queue.put((b, w))
+
+            task = {
+                "black" : b,
+                "white" : w,
+                "id"    : i
+            }
+            finished_queue.put(task)
 
         # More sleep if there are more running threads because
         # we want to raise probability of the process with low
@@ -308,21 +339,24 @@ def match_loop(ready_queue, finished_queue):
         time.sleep(min(2, 0.1 + 0.1 * len(match_threads)))
 
         try:
-            black, white = ready_queue.get(block=True, timeout=0)
+            task = ready_queue.get(block=True, timeout=0)
+            black = task["black"] # black player
+            white = task["white"] # white player
+            game_id = task["id"]
         except queue.Empty:
             continue
 
-        # TODO: User can change the setting. Each theard can
-        #       play variable game.
-        setting = dict()
-        setting["main_time"] = config.DEFAULT_BOARD_SIZE
-        setting["board_size"] = config.DEFAULT_BOARD_SIZE
-        setting["komi"] = config.DEFAULT_KOMI
+
+        setting = {
+            "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
+            "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
+            "komi"       : task.get("komi", config.DEFAULT_KOMI)
+        }
 
         t = threading.Thread(
                 target=play_match_game,
-                args=(black, white, setting, ),
+                args=(black, white, game_id, setting, ),
                 daemon=True
             )
         t.start()
-        match_threads[t.ident] = (t, black, white)
+        match_threads[t.ident] = (t, black, white, game_id)
