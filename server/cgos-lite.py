@@ -8,12 +8,18 @@ import os
 import multiprocessing as mp
 
 import config
-from match import ClientStatus, match_loop
+from match import ClientSocket, match_loop
 
 def master_loop():
+    # Make the SGF files directory.
+    sgf_path = os.path.join(*config.SGF_DIR_PATH)
+    if not os.path.isdir(sgf_path):
+        os.mkdir(sgf_path)
+
     # Allocate all data structure.
     client_pool = dict()
     process_pool = list() 
+    commands_queue = list()
     ready_queue = mp.Queue()
     finished_queue = mp.Queue()
     last_game_id = 0
@@ -37,13 +43,15 @@ def master_loop():
     server_sock.bind(("", config.SERVER_PORT))
     server_sock.listen(10)
 
+    print("The client is ready.")
+
     # Start the master loop. There are 3 stages.
-    # 1. Check the connecting clients.
-    # 2. Check the user command.
-    # 3. Check the finished queue.
+    # 1st. Check the connecting clients.
+    # 2nd. Check the user command.
+    # 3rd. Check the finished queue.
     try:
         while True:
-            # 1. Check the connecting clients.
+            # 1st. Check the connecting clients.
             read_list = [server_sock]
             readable, _, err = select.select(read_list, [], read_list, 0.1)
 
@@ -59,7 +67,7 @@ def master_loop():
                     # New client connects to the server.
                     client_sock, _ = server_sock.accept()
                     fid = client_sock.fileno()
-                    c = ClientStatus()
+                    c = ClientSocket()
                     c.setup_socket(client_sock)
                     client_pool[fid] = c
                     outs_info = "The socket {} [{}] connects to the server".format(
@@ -67,10 +75,14 @@ def master_loop():
                                 )
                     print(outs_info)
 
-            # 2. Check the user command.
+            # 2nd. Check the user command.
             read_list, _, _ = select.select([sys.stdin], [], [], 0)
             if read_list:
                 cmd = sys.stdin.readline().strip()
+                commands_queue.append(cmd)
+
+            if len(commands_queue) != 0:
+                commands_queue.pop(0)
                 cmd_list = cmd.split()
                 print("Get command [{}]...".format(cmd))
 
@@ -97,12 +109,7 @@ def master_loop():
                     #     "fid"    : select two clients with socket id
                     #     "file"   : not yet
                     keys = list(client_pool.keys())
-                    is_good = False
-                    black = None # blackc player
-                    white = None # white player
-                    mtime = None # main time in second
-                    bsize = None # board size
-                    komi = None # komi
+                    task = { "id" : last_game_id }
 
                     if len(keys) <= 1:
                         print("There are not enough ready clients.")
@@ -110,9 +117,8 @@ def master_loop():
                         print("Miss some paramters.")
                     elif cmd_list[1] == "random":
                         random.shuffle(keys)
-                        black = client_pool.pop(keys.pop(0)) # black player
-                        white = client_pool.pop(keys.pop(0)) # white player
-                        is_good = True
+                        task["black"] = client_pool.pop(keys.pop(0)) # black player
+                        task["white"] = client_pool.pop(keys.pop(0)) # white player
                     elif cmd_list[1] == "fid":
                         # Keep to get the setting paramter. Must provide black
                         # fid and white fid. Two fids must be different. Others
@@ -128,60 +134,51 @@ def master_loop():
                             field = None
                             if i == 2:
                                 black_fid = int(c) # black player
-                                black = client_pool.pop(black_fid, None)
+                                task["black"] = client_pool.pop(black_fid, None)
                             elif i == 3:
                                 white_fid = int(c) # black player
-                                white = client_pool.pop(white_fid, None)
+                                task["white"] = client_pool.pop(white_fid, None)
                             elif i >= 4:
-                                # optinal fields
+                                # Optional fields, it is not necessary. Use the
+                                # default value if we do not give key-value pair. 
                                 if field is None:
                                     field = c
                                 elif field == "mtime":
-                                    mtime = int(c) # get main time
+                                    task["main_time"] = int(c) # get main time
                                     field = None
                                 elif field == "bsize":
-                                    bsize = int(c) # get board size
+                                    task["board_size"] = int(c) # get board size
                                     field = None
                                 elif field == "komi":
-                                    komi = float(c) # get komi
+                                    task["komi"] = float(c) # get komi
                                     field = None
                                 else:
                                     field = None
                             i += 1
-                        if black is not None and white is not None:
-                            is_good = True
 
-                    if is_good:
+                    if task.get("black", None) is not None and \
+                           task.get("white", None) is not None:
                         # The current setting is valid. Push the task
                         # to ready queue.
-                        task = {
-                            "black" : black,
-                            "white" : white,
-                            "id"    : last_game_id
-                        }
-                        if mtime is not None:
-                            task["main_time"] = mtime
-                        if bsize is not None:
-                            task["board_size"] = bsize
-                        if komi is not None:
-                            task["komi"] = komi
                         ready_queue.put(task)
-
                         outs_info = "New match game {}, black is {} and white is {}.".format(
-                                        last_game_id, black.name, white.name
+                                        last_game_id,
+                                        task["black"].name,
+                                        task["white"].name
                                     )
                         print(outs_info)
                         last_game_id += 1
                 else:
                     print("Invalid command [{}]...".format(cmd))
 
-            # 3. Check the finished queue.
+            # 3rd. Check the finished queue.
             try:
                 # Collect the finished clients from queue. Reset the
                 # clients status to waiting.
                 task = finished_queue.get(block=True, timeout=0.1)
-                client_pool[black.fid] = task["black"]
-                client_pool[white.fid] = task["white"]
+                black, white = task["black"], task["white"]
+                client_pool[black.fid] = black
+                client_pool[white.fid] = white
                 print("The match game {} is over.".format(task["id"]))
             except queue.Empty:
                 pass

@@ -9,4 +9,3 @@ DEFAULT_BOARD_SIZE = 9
 DEFAULT_KOMI = 7
 
 SGF_DIR_PATH = [".", "sgfs"]
-

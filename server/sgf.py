@@ -7,8 +7,8 @@ def make_sgf(
     white_name,
     main_time,
     date,
-    result,
-    history
+    history,
+    result
 ):
     def escape_text(s):
         sgf_special_chars = str.maketrans(
@@ -29,12 +29,15 @@ def make_sgf(
                komi=komi,
                t=main_time
            )
-    sgf += "PB[{black}]PW[{white}]DT[{date}]RE[{res}]\n".format(
+    sgf += "PB[{black}]PW[{white}]DT[{date}]".format(
                black=black_name,
                white=white_name,
-               date=date,
-               res=result
+               date=date
            )
+    if result is not None:
+        sgf += "RE[{res}]\n".format(res=result)
+    else:
+        sgf += "\n"
 
     i = 0
     for move, time_left, analysis in history:
@@ -83,4 +86,5 @@ def make_sgf(
         to_move = to_move ^ 1
 
     sgf += ")\n"
+
     return sgf

@@ -9,7 +9,7 @@ import os
 import board as brd
 from sgf import make_sgf
 
-class ClientStatus:
+class ClientSocket:
     def __init__(self):
         self.name = None
         self.sock = None
@@ -36,18 +36,27 @@ class ClientStatus:
 
         self.name = self.request_username().strip()
         msg = self.request_password() # not used...
+
+        # Close the socket file because the we can not push socket file
+        # onto process queue. 
         self.close_sockfile()
 
     def request_info(self, info):
+        # Send the information to client. The client should
+        # store this it. There is no return value.
         self.send("info {}".format(info))
 
     def request_protocol(self):
+        # Send the supported protocol type to client. The client
+        # should send the version and other information.
         return self.send_and_receive("protocol genmove_analyze")
 
     def request_username(self):
+        # Request the client to send the client's name to server.
         return self.send_and_receive("username")
 
     def request_password(self):
+        # Request the client to send the client's password to server.
         return self.send_and_receive("password")
 
     def request_setup(self, board_size,
@@ -55,6 +64,10 @@ class ClientStatus:
                             main_time_msec,
                             player_a_name,
                             player_b_name):
+        # Send the game information to serve, including game id,
+        # board size, komi, main think time in milliseconds and 
+        # player name. The client should initialize the game.
+        # There is no return value.
         game_id = 0
         param = "{} {} {} {} {} {}".format(
                     game_id,
@@ -67,18 +80,23 @@ class ClientStatus:
         return self.send("setup {}".format(param))
 
     def request_play(self, color, move, time_left_msec):
+        # Send the color, coordinate and time left in milliseconds.
+        # The client should play this move. Thre is no return value.
         param = "{} {} {}".format(
                     color, move, time_left_msec
                 )
         return self.send("play {}".format(param))
 
     def request_genmove(self, color, time_left_msec):
+        # Send the color and time left in milliseconds. The client
+        # should send the best move to server.
         param = "{} {}".format(
                     color, time_left_msec
                 )
         return self.send_and_receive("genmove {}".format(param))
 
     def request_gameover(self, date, result, err):
+        # Send the game the result to client.
         param = "{} {} {}".format(
                     date, result, err
                 )
@@ -170,9 +188,12 @@ def play_match_game(black, white, game_id, setting):
         brd.WHITE : white
     }
 
-    history = list() # move, time_left and analysis
+    sgf_path = os.path.join(*config.SGF_DIR_PATH)
+    move_history = list() # move, time_left and analysis
 
     for player in players.values():
+        # Request each clients to initialize the game also
+        # create new socket file.
         player.create_sockfile()
         player.request_setup(
             setting["board_size"],
@@ -182,6 +203,7 @@ def play_match_game(black, white, game_id, setting):
             players[brd.BLACK].name
         )
 
+    # We record the starting in the the ctime.
     ctime = datetime.datetime.now(datetime.timezone.utc)
     board = brd.Board(setting["board_size"], setting["komi"])
     result_status = dict()
@@ -192,7 +214,7 @@ def play_match_game(black, white, game_id, setting):
             opp_to_move = get_opp_color(board.to_move)
             to_move_player = players[side_to_move]
 
-            # Request engine the to do the genmove command.
+            # Request the engine to genmove the next move.
             clock_time = time.time()
             time_left = time_lefts[side_to_move]
             rep = to_move_player.request_genmove(
@@ -211,6 +233,7 @@ def play_match_game(black, white, game_id, setting):
                                         )
                 break
 
+            # Parse the move and analysis string.
             time_lefts[side_to_move] = time_left
             move, vertex, analysis = move_to_vertex(
                                          board,
@@ -240,9 +263,24 @@ def play_match_game(black, white, game_id, setting):
                                         )
                 break    
 
-            history.append((move, int(time_left), analysis))
+            move_history.append((move, int(time_left), analysis))
 
+            # Save game result into SGF file after updating
+            # the move_history.
+            sgf = make_sgf(
+                      board.board_size,
+                      board.komi,
+                      black.name,
+                      white.name,
+                      setting["main_time"],
+                      ctime.strftime("%Y-%m-%d"),
+                      move_history,
+                      None,
+                  )
+            with open(os.path.join(sgf_path, "{}.sgf".format(game_id)), 'w') as f:
+                f.write(sgf)
 
+            # Request the opponent to play the move.
             time_left = time_lefts[opp_to_move]
             opp_player = players[opp_to_move]
             opp_player.request_play(
@@ -284,11 +322,11 @@ def play_match_game(black, white, game_id, setting):
     black.request_gameover(date, result, err)
     white.request_gameover(date, result, err)
 
+     # Close the socket file because the we can not push socket file
+     # onto process queue. 
     for player in players.values():
         player.close_sockfile()
 
-
-    # Save the sgf file.
     sgf = make_sgf(
               board.board_size,
               board.komi,
@@ -296,14 +334,9 @@ def play_match_game(black, white, game_id, setting):
               white.name,
               setting["main_time"],
               date,
-              result,
-              history
+              move_history,
+              result
           )
-
-    sgf_path = os.path.join(*config.SGF_DIR_PATH)
-    if not os.path.isdir(sgf_path):
-        os.mkdir(sgf_path)
-
     with open(os.path.join(sgf_path, "{}.sgf".format(game_id)), 'w') as f:
         f.write(sgf)
 
@@ -353,6 +386,8 @@ def match_loop(ready_queue, finished_queue):
             "komi"       : task.get("komi", config.DEFAULT_KOMI)
         }
 
+        # New game is starting. Each threads hold one game. The threads
+        # will be released after the gameover.
         t = threading.Thread(
                 target=play_match_game,
                 args=(black, white, game_id, setting, ),

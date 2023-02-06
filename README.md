@@ -6,14 +6,20 @@ A simplified CGOS server.
 
 * python 3.x or above
 
+## Run the Server
+
+    python3 cgos-lite
+
 ## Support Command
 
-* ```quit``` : End the server
+* ```quit``` : End the server.
 * ```match random```: Randomly select two waiting clients for the match game.
-* ```match (black fid) (white fid)```: Select two waiting clients for the match game with socket id.
-* ```show clients```: Show the all socket id.
+* ```match fid (black fid) (white fid)```: Select two waiting clients for the match game with socket id.
+* ```show clients```: Show the all waiting socket ids and names.
 
 ## Configure
+
+Set the value in the ```config.py```
 
 * ```SERVER_PORT``` : The server port.
 * ```NUM_WORKERS``` : How main cores do we use.
@@ -23,4 +29,6 @@ A simplified CGOS server.
 * ```SGF_DIR_PATH``` : Will save the SGF files under this path.
 
 
+## TODO
 
+* Support Jappenese rule.
