@@ -47,7 +47,7 @@ class MasterSocket:
         # Allocate the process(s).
         num_workers = config.NUM_WORKERS
         if num_workers is None:
-            # Should I leave one core for master?
+            # TODO: Should I leave one core for master?
             num_workers = os.cpu_count()
         for i in range(max(num_workers, 1)):
             pid = i
@@ -60,9 +60,9 @@ class MasterSocket:
             p.start()
             self.process_pool.append(
                 { 
-                    "proc" : p, # The process.
-                    "load" : 0, # The number of running games.
-                    "pid"  : pid
+                    "proc" : p,  # The process.
+                    "load" : 0,  # The number of running games.
+                    "pid"  : pid # The process id.
                 }
             )
 
@@ -154,10 +154,11 @@ class MasterSocket:
             if cmd_list.get(1, None) == "client":
                 for k, v in self.waiting_clients.items():
                     self.logger.info("    fid: {} -> {}".format(k, v.name))
-
-            if cmd_list.get(1, None) == "process":
+            elif cmd_list.get(1, None) == "process":
                 for p in self.process_pool:
                     self.logger.info("    pid: {} -> {}".format(p["pid"], p["load"]))
+            else:
+                self.logger.info("Unknown parameter.")
 
         elif cmd_list["main"] == "match":
             # The "match" command will select two waiting clients
@@ -169,17 +170,14 @@ class MasterSocket:
 
             if len(keys) <= 1:
                 self.logger.info("There are not enough ready clients.")
-            elif len(cmd_list) <= 1:
-                self.logger.info("Miss some paramters.")
-            elif cmd_list[1] == "random":
+            elif cmd_list.get(1, None) == "random":
                 random.shuffle(keys)
                 task["black"] = self.waiting_clients.pop(keys.pop(0)) # black player
                 task["white"] = self.waiting_clients.pop(keys.pop(0)) # white player
-            elif cmd_list[1] == "fid":
+            elif cmd_list.get(1, None) == "fid":
                 # Keep to get the setting paramter. Must provide black
                 # fid and white fid. Two fids must be different. Others
                 # are optional. The format is
-                # format is
                 #
                 # match fid 100 200
                 # match fid 100 200 bsize 17
@@ -197,20 +195,17 @@ class MasterSocket:
                         # default value if we do not give key-value pair. 
                         if field is None:
                             field = c
-                        elif field == "mtime":
-                            task["main_time"] = int(c) # get main time
-                            field = None
-                        elif field == "bsize":
-                            task["board_size"] = int(c) # get board size
-                            field = None
-                        elif field == "komi":
-                            task["komi"] = float(c) # get komi
-                            field = None
                         else:
-                            field = None
+                            if field == "mtime":
+                                task["main_time"] = int(c) # get main time
+                            elif field == "bsize":
+                                task["board_size"] = int(c) # get board size
+                            elif field == "komi":
+                                task["komi"] = float(c) # get komi
+                            field = None # clean the field
                     i += 1
             else:
-                self.logger.info("unknown parameter.")
+                self.logger.info("Unknown parameter.")
 
             if task.get("black", None) is not None and \
                    task.get("white", None) is not None:
@@ -237,6 +232,14 @@ class MasterSocket:
                             )
                 self.logger.info(outs_info)
                 self.last_game_id += 1
+            else:
+                # If the task is invalid, return the clients to
+                # waiting list.
+                black, white = task.get("black", None), task.get("white", None)
+                if black is not None:
+                    self.waiting_clients[black.fid] = black
+                if white is not None:
+                    self.waiting_clients[white.fid] = white
         else:
             self.logger.info("Invalid command [{}]...".format(cmd))
 
@@ -245,7 +248,7 @@ class MasterSocket:
             # Collect the finished clients from queue. Reset the
             # clients status to waiting.
             task = self.finished_queue.get(block=True, timeout=0.1)
-            black, white, pid= task["black"], task["white"], task["pid"]
+            black, white, pid = task["black"], task["white"], task["pid"]
             self.process_pool[pid]["load"] -= 1
             self.waiting_clients[black.fid] = black
             self.waiting_clients[white.fid] = white

@@ -139,7 +139,7 @@ class ClientSocket:
         self.send(msg)
         return self.receive()
 
-def play_match_game(black, white, game_id, setting):
+def play_match_game(game_id, black, white, setting):
     def color_to_char(c):
         if c == brd.BLACK:
             return 'b'
@@ -188,6 +188,8 @@ def play_match_game(black, white, game_id, setting):
         brd.WHITE : white
     }
 
+    sgf_clock_time = time.time()
+    sgf_name = "{}(B)_{}(W)_gid{}.sgf".format(black.name, white.name, game_id)
     sgf_path = os.path.join(*config.SGF_DIR_PATH)
     move_history = list() # move, time_left and analysis
 
@@ -203,8 +205,8 @@ def play_match_game(black, white, game_id, setting):
             players[brd.BLACK].name
         )
 
-    # We record the starting in the the ctime.
-    ctime = datetime.datetime.now(datetime.timezone.utc)
+    # We record the starting in the the date.
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     board = brd.Board(setting["board_size"], setting["komi"])
     result_status = dict()
 
@@ -265,20 +267,23 @@ def play_match_game(black, white, game_id, setting):
 
             move_history.append((move, int(time_left), analysis))
 
-            # Save game result into SGF file after updating
-            # the move_history.
-            sgf = make_sgf(
-                      board.board_size,
-                      board.komi,
-                      black.name,
-                      white.name,
-                      setting["main_time"],
-                      ctime.strftime("%Y-%m-%d"),
-                      move_history,
-                      None,
-                  )
-            with open(os.path.join(sgf_path, "{}.sgf".format(game_id)), 'w') as f:
-                f.write(sgf)
+            # Try to save game result into SGF file after updating
+            # the move_history. Failed to save it if the client play
+            # the move too quick. 
+            if time.time() - sgf_clock_time > 5:
+                sgf = make_sgf(
+                          board.board_size,
+                          board.komi,
+                          black.name,
+                          white.name,
+                          setting["main_time"],
+                          date,
+                          move_history,
+                          None,
+                      )
+                with open(os.path.join(sgf_path, sgf_name), 'w') as f:
+                    f.write(sgf)
+                sgf_clock_time = time.time()
 
             # Request the opponent to play the move.
             time_left = time_lefts[opp_to_move]
@@ -311,19 +316,20 @@ def play_match_game(black, white, game_id, setting):
                                             )
                 break
     except:
+        # TODO: Catch the error string and reture it to
+        #       master.
         result_status["winner"] = brd.EMPTY
         result_status["type"] = "no result"
         result_status["info"] = "0"
 
-    date = ctime.strftime("%Y-%m-%d")
     result = result_status["info"]
     err = str()
 
     black.request_gameover(date, result, err)
     white.request_gameover(date, result, err)
 
-     # Close the socket file because the we can not push socket file
-     # onto process queue. 
+    # Close the socket file because the we can not push socket file
+    # onto process queue. 
     for player in players.values():
         player.close_sockfile()
 
@@ -337,7 +343,7 @@ def play_match_game(black, white, game_id, setting):
               move_history,
               result
           )
-    with open(os.path.join(sgf_path, "{}.sgf".format(game_id)), 'w') as f:
+    with open(os.path.join(sgf_path, sgf_name), 'w') as f:
         f.write(sgf)
 
 
@@ -356,7 +362,7 @@ def match_loop(process_id, ready_queue, finished_queue):
             # The match game is game over. Push the play
             # back to main pooling.
             v = match_threads.pop(i)
-            t, b, w, i = v
+            t, i, b, w = v
             t.join()
 
             task = {
@@ -368,17 +374,16 @@ def match_loop(process_id, ready_queue, finished_queue):
             finished_queue.put(task)
 
         try:
-            task = ready_queue.get(block=True, timeout=0)
+            task = ready_queue.get(block=True, timeout=0.1)
             if task["pid"] != process_id:
                 # Not correct process id. Reture it to finished
                 # queue.
                 finished_queue.put(task)
             black = task["black"] # black player
             white = task["white"] # white player
-            game_id = task["gid"]
+            game_id = task["gid"] # game id
         except queue.Empty:
             continue
-
 
         setting = {
             "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
@@ -390,8 +395,8 @@ def match_loop(process_id, ready_queue, finished_queue):
         # will be released after the gameover.
         t = threading.Thread(
                 target=play_match_game,
-                args=(black, white, game_id, setting, ),
+                args=(game_id, black, white, setting, ),
                 daemon=True
             )
         t.start()
-        match_threads[t.ident] = (t, black, white, game_id)
+        match_threads[t.ident] = (t, game_id, black, white)
