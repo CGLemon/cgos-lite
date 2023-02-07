@@ -15,7 +15,8 @@ A simplified CGOS server.
 * ```quit``` : End the server.
 * ```match random```: Randomly select two waiting clients for the match game.
 * ```match fid (black fid) (white fid)```: Select two waiting clients for the match game with socket id.
-* ```show clients```: Show the all waiting socket ids and names.
+* ```show client```: Show the all waiting socket ids and names.
+* ```file [filename]```: Read the batched commands from file.
 
 ## Configure
 
@@ -28,7 +29,10 @@ Set the value in the ```config.py```
 * ```DEFAULT_KOMI``` : The default komi if we do not specify a value in the match.
 * ```SGF_DIR_PATH``` : Will save the SGF files under this path.
 
-
 ## TODO
 
 * Support Jappenese rule.
+
+## LICENSE
+
+The code is released under the MIT, except for board.py and sgf.py, which have specific licenses mentioned in those files.

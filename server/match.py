@@ -341,7 +341,7 @@ def play_match_game(black, white, game_id, setting):
         f.write(sgf)
 
 
-def match_loop(ready_queue, finished_queue):
+def match_loop(process_id, ready_queue, finished_queue):
     match_threads = dict()
 
     while True:
@@ -362,20 +362,20 @@ def match_loop(ready_queue, finished_queue):
             task = {
                 "black" : b,
                 "white" : w,
-                "id"    : i
+                "gid"   : i,
+                "pid"   : process_id
             }
             finished_queue.put(task)
 
-        # More sleep if there are more running threads because
-        # we want to raise probability of the process with low
-        # running threads to get the match task.
-        time.sleep(min(2, 0.1 + 0.1 * len(match_threads)))
-
         try:
             task = ready_queue.get(block=True, timeout=0)
+            if task["pid"] != process_id:
+                # Not correct process id. Reture it to finished
+                # queue.
+                finished_queue.put(task)
             black = task["black"] # black player
             white = task["white"] # white player
-            game_id = task["id"]
+            game_id = task["gid"]
         except queue.Empty:
             continue
 
