@@ -12,34 +12,36 @@ from match import ClientSocket, match_loop
 
 class MasterSocket:
     def __init__(self):
-        # TODO: We should record each games and clients status in
-        #       order to control the games.
+        # The processes run the match games.
         self.process_pool = list() 
-        self.waiting_clients = dict()
-        self.ready_queue_pool = list()
-        self.finished_queue = mp.Queue()
+
+        # Record current the match game and clients status.
+        self.game_tasks = dict()
+        self.client_pool = dict()
+
+        # There are tree pipe to control the match games
+        # schedule. Their relation are here.
+        #
+        # Add new clients: (get the socket) => waiting_clients
+        # schedule game:    waiting_clients => ready_queue_pool
+        # playing game:    ready_queue_pool => (thread running...) => finished_queue
+        # finshed game:      finished_queue => waiting_clients
+        # terninate:        waiting_clients => (close the socket)
+        self.waiting_clients = set()
+        self.ready_queue_pool = list() # One process uses one independent ready queue.
+        self.finished_queue = mp.Queue() # All processes share one finished queue.
         self.last_game_id = 0
+        self.should_remove_fids = set()
 
         # Set the logging file.
-        self.logger = logging.getLogger("master.MasterSocket")
-        self.logger.setLevel(logging.DEBUG)
+        self.logger = self.get_and_setup_logging(
+                          "master.MasterSocket",
+                          "log.txt",
+                          sys.stdout
+                      )
 
-        # Log debug output to file
-        handler = logging.FileHandler("log.txt")
-        handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s: %(message)s")
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
-        # Log info output to console
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setLevel(logging.INFO)
-        formatter = logging.Formatter("%(asctime)s: %(message)s")
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
-        # Make the SGF files directory. We will
-        # save the match games here.
+        # Make the SGF files directory. We will save
+        # the match games here.
         sgf_path = os.path.join(*config.SGF_DIR_PATH)
         if not os.path.isdir(sgf_path):
             os.mkdir(sgf_path)
@@ -72,6 +74,25 @@ class MasterSocket:
         self.server_sock.listen(10)
         self.logger.info("The client is ready.")
 
+    def get_and_setup_logging(self, name, out_file, out_io):
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+
+        # Log debug output to file
+        handler = logging.FileHandler(out_file)
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s: %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
+        # Log info output to console
+        handler = logging.StreamHandler(out_io)
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(asctime)s: %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        return logger
+
     def handle_clients(self):
         read_list = [self.server_sock]
         readable, _, err = select.select(read_list, [], read_list, 0.1)
@@ -79,9 +100,18 @@ class MasterSocket:
         for s in err:
             # Some mistake in the client. Close it. 
             fid = s.fileno()
-            c = self.waiting_clients.pop(fid, None)
+
+            c = self.client_pool.pop(fid, None)
             if c is not None:
-                c.close()
+                # Don't remove the waiting_clients here because
+                # It may be in the match game. We will synchronize
+                # it later.
+                self.should_remove_fids.add(c.fid)
+                try:
+                    # Maybe the socket be closed. 
+                    c.close()
+                except:
+                    pass
 
         for s in readable:
             if s is self.server_sock:
@@ -90,7 +120,13 @@ class MasterSocket:
                 fid = client_sock.fileno()
                 c = ClientSocket()
                 c.setup_socket(client_sock)
-                self.waiting_clients[fid] = c
+                self.waiting_clients.add(fid)
+                self.client_pool[fid] = {
+                    "socket" : c,
+                    "status" : "waiting",
+                    "pid"    : None,
+                    "gid"    : None
+                }
                 outs_info = "The socket {} (\"{}\") connects to the server.".format(
                                 fid, c.name
                             )
@@ -111,13 +147,20 @@ class MasterSocket:
             cmd_list[i] = cmd_list_raw[i]
         cmd_list["main"] = cmd_list_raw[0]
 
+        # Synchronize the waiting_clients here.
+        remove_list = list(self.should_remove_fids)
+        for fid in remove_list:
+            if fid in self.waiting_clients:
+                self.waiting_clients.remove(fid)
+                self.should_remove_fids.remove(fid)
+
         self.logger.info("Get command [\"{}\"]...".format(cmd))
 
         if cmd_list["main"] == "quit":
             # End the program.
-            for k, v in self.waiting_clients.items():
+            for k, v in self.client_pool.items():
                 self.logger.info("Close the socket {}.".format(k))
-                v.close()
+                v["socket"].close()
             self.logger.info("Terminate the process pool.")
 
             for p in self.process_pool:
@@ -152,8 +195,11 @@ class MasterSocket:
         elif cmd_list["main"] == "show":
             # Show some server status.
             if cmd_list.get(1, None) == "client":
-                for k, v in self.waiting_clients.items():
-                    self.logger.info("    fid: {} -> {}".format(k, v.name))
+                for k, v in self.client_pool.items():
+                    #TODO: better information format
+                    out_info = "    fid: {} -> {}, {}, {}, {}".format(
+                                   k, v["socket"].name, v["status"], v["gid"], v["pid"])
+                    self.logger.info(out_info)
             elif cmd_list.get(1, None) == "process":
                 for p in self.process_pool:
                     self.logger.info("    pid: {} -> {}".format(p["pid"], p["load"]))
@@ -165,15 +211,23 @@ class MasterSocket:
             # for match game. Here are the valid commands
             #     "random" : randomly select two clients
             #     "fid"    : select two clients with socket id
-            keys = list(self.waiting_clients.keys())
-            task = { "gid" : self.last_game_id }
+            keys = list(self.waiting_clients)
+            task = {
+                "black" : None,
+                "white" : None,
+                "gid" : self.last_game_id
+            }
 
             if len(keys) <= 1:
                 self.logger.info("There are not enough ready clients.")
             elif cmd_list.get(1, None) == "random":
                 random.shuffle(keys)
-                task["black"] = self.waiting_clients.pop(keys.pop(0)) # black player
-                task["white"] = self.waiting_clients.pop(keys.pop(0)) # white player
+                black_fid = keys.pop(0)
+                white_fid = keys.pop(0)
+
+                for name, fid in zip(["black", "white"], [black_fid, white_fid]):
+                    self.waiting_clients.remove(fid)
+                    task[name] = self.client_pool[fid]["socket"]
             elif cmd_list.get(1, None) == "fid":
                 # Keep to get the setting paramter. Must provide black
                 # fid and white fid. Two fids must be different. Others
@@ -186,10 +240,15 @@ class MasterSocket:
                 i = 0
                 for c in cmd_list_raw:
                     field = None
-                    if i == 2:
-                        task["black"] = self.waiting_clients.pop(int(c), None) # black player
-                    elif i == 3:
-                        task["white"] = self.waiting_clients.pop(int(c), None) # white player
+                    if i == 2 or i == 3:
+                        names = ["black", "white"]
+                        try:
+                            fid = int(c) # may fail here
+                            if fid in self.waiting_clients:
+                                self.waiting_clients.remove(fid)
+                                task[names[i-2]] = self.client_pool[fid]["socket"]
+                        except:
+                            pass
                     elif i >= 4:
                         # Optional fields, it is not necessary. Use the
                         # default value if we do not give key-value pair. 
@@ -224,9 +283,17 @@ class MasterSocket:
                 # to ready queue.
                 self.ready_queue_pool[select_pid].put(task)
 
+                for name in ["black", "white"]:
+                    fid = task[name].fid
+                    self.client_pool[fid]["status"] = "playing"
+                    self.client_pool[fid]["gid"] = task["gid"]
+                    self.client_pool[fid]["pid"] = task["pid"]
+
+                self.game_tasks[task["gid"]] = task
+
                 outs_info = "The new match game {} in the process {}, {}(B) vs {}(W).".format(
-                                self.last_game_id,
-                                select_pid,
+                                task["gid"],
+                                task["pid"],
                                 task["black"].name,
                                 task["white"].name
                             )
@@ -237,9 +304,9 @@ class MasterSocket:
                 # waiting list.
                 black, white = task.get("black", None), task.get("white", None)
                 if black is not None:
-                    self.waiting_clients[black.fid] = black
+                    self.waiting_clients.add(black.fid)
                 if white is not None:
-                    self.waiting_clients[white.fid] = white
+                    self.waiting_clients.add(white.fid)
         else:
             self.logger.info("Invalid command [{}]...".format(cmd))
 
@@ -250,8 +317,11 @@ class MasterSocket:
             task = self.finished_queue.get(block=True, timeout=0.1)
             black, white, pid = task["black"], task["white"], task["pid"]
             self.process_pool[pid]["load"] -= 1
-            self.waiting_clients[black.fid] = black
-            self.waiting_clients[white.fid] = white
+            self.waiting_clients.update({black.fid, white.fid})
+            for fid in [black.fid, white.fid]:
+                self.client_pool[fid]["status"] = "waiting"
+                self.client_pool[fid]["pid"] = None
+                self.client_pool[fid]["gid"] = None
             self.logger.info("The match game {} is over.".format(task["gid"]))
         except queue.Empty:
             pass

@@ -1,6 +1,6 @@
 # cgos-lite
 
-A simplified CGOS server.
+A simplified [CGOS](https://github.com/zakki/cgos) server.
 
 ## Requirements
 
@@ -31,7 +31,9 @@ Set the value in the ```config.py```
 
 ## TODO
 
-* Support Jappenese rule.
+* Support the Jappenese rule.
+* Handle the disconnect issue.
+* Start the match game from disconnect time.
 
 ## LICENSE
 

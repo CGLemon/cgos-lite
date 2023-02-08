@@ -9,6 +9,10 @@ import os
 import board as brd
 from sgf import make_sgf
 
+class ClientStatus:
+    def __init__(self):
+        pass
+
 class ClientSocket:
     def __init__(self):
         self.name = None
@@ -154,7 +158,7 @@ def play_match_game(game_id, black, white, setting):
         move = move.strip()
         analysis = None
         if support_analysis:
-            # parse and validate analyze info
+            # Parse and validate analyze info.
             tokens = move.split(None, 1)
             move = tokens[0]
             if len(tokens) > 1:
