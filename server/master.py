@@ -100,18 +100,13 @@ class MasterSocket:
         for s in err:
             # Some mistake in the client. Close it. 
             fid = s.fileno()
-
-            c = self.client_pool.pop(fid, None)
+            c = self.client_pool.get(fid, None)
             if c is not None:
-                # Don't remove the waiting_clients here because
-                # It may be in the match game. We will synchronize
-                # it later.
-                self.should_remove_fids.add(c.fid)
-                try:
-                    # Maybe the socket be closed. 
-                    c.close()
-                except:
-                    pass
+                self.should_remove_fids.add(fid)
+                outs_info = "The socket {} (\"{}\") is closed.".format(
+                                fid, c["socket"].name
+                            )
+                self.logger.info(outs_info)
 
         for s in readable:
             if s is self.server_sock:
@@ -132,6 +127,23 @@ class MasterSocket:
                             )
                 self.logger.info(outs_info)
 
+        for fid, v in self.client_pool.items():
+            # Check the crash socket.
+            if v["socket"].crash:
+                self.should_remove_fids.add(fid)
+
+        for fid in self.should_remove_fids:
+            # Don't remove the waiting_clients here because
+            # It may be in the match game. We will synchronize
+            # it later.
+            c = self.client_pool.pop(fid, None)
+            try:
+                # Maybe the socket be closed.
+                c["socket"].close()
+            except:
+                pass
+        self.should_remove_fids.clear()
+
     def handle_command(self, commands_queue):
         if len(commands_queue) == 0:
             return
@@ -147,12 +159,13 @@ class MasterSocket:
             cmd_list[i] = cmd_list_raw[i]
         cmd_list["main"] = cmd_list_raw[0]
 
-        # Synchronize the waiting_clients here.
-        remove_list = list(self.should_remove_fids)
-        for fid in remove_list:
-            if fid in self.waiting_clients:
+        # Synchronize the waiting_clients here. Remove
+        # the closed socket fids.
+        wc_list = list(self.waiting_clients)
+        for fid in wc_list:
+            c = self.client_pool.get(fid, None)
+            if c is None:
                 self.waiting_clients.remove(fid)
-                self.should_remove_fids.remove(fid)
 
         self.logger.info("Get command [\"{}\"]...".format(cmd))
 
@@ -170,6 +183,16 @@ class MasterSocket:
             # all processes and do other important things
             # before it.
             sys.exit(1)
+        elif cmd_list["main"] == "close":
+            # Close a socket via fids.
+            i = 0
+            for c in cmd_list_raw:
+                if i >= 1:
+                    try:
+                        fid = int(cmd_list.get(i, None))
+                        self.should_remove_fids.add(fid)
+                    except:
+                        continue
         elif cmd_list["main"] == "file":
             # Read the batched commands from file. one line
             # should be one command. For example,

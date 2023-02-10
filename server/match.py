@@ -9,9 +9,13 @@ import os
 import board as brd
 from sgf import make_sgf
 
-class ClientStatus:
-    def __init__(self):
-        pass
+class ClientSocketError(Exception):
+    def __init__(self, who, msg):
+        self.who = who
+        self.msg = msg
+
+    def __str__(self):
+        return repr(self.msg)
 
 class ClientSocket:
     def __init__(self):
@@ -20,6 +24,7 @@ class ClientSocket:
         self._sock_file = None
         self.fid = None
         self.support_analysis = False
+        self.crash = False
 
     def setup_socket(self, sock):
         if self.sock is not None:
@@ -36,7 +41,8 @@ class ClientSocket:
             parameters = msg.split()
             self.support_analysis = "genmove_analyze" in parameters
         else:
-            raise Exception("Do not soppurt this client version.")
+            self.crash = True
+            raise ClientSocketError(self, "Do not soppurt this client version.")
 
         self.name = self.request_username().strip()
         msg = self.request_password() # not used...
@@ -113,23 +119,38 @@ class ClientSocket:
             self.sock = None
             self.fid = None
         except:
-            raise Exception("Can not close the client socket.")
+            self.crash = True
+            raise ClientSocketError(self, "Can not close the client socket.")
 
     def create_sockfile(self):
+        # We must create socket file before sending the
+        # message.
         self.close_sockfile()
-        self._sock_file = self.sock.makefile("rw", encoding="utf-8")
+        try:
+            self._sock_file = self.sock.makefile("rw", encoding="utf-8")
+        except:
+            self.crash = True
+            raise ClientSocketError(self, "Can not create the socket file.")
 
     def close_sockfile(self):
-        if self._sock_file is not None:
-            self._sock_file.close()
-        self._sock_file = None
+        # Close the socket file before pushing onto the
+        # process queue because socket file can not be
+        # converted to bytes type.
+        try:
+            if self._sock_file is not None:
+                self._sock_file.close()
+            self._sock_file = None
+        except:
+            self.crash = True
+            raise ClientSocketError(self, "Can not close the socket file.")
 
     def receive(self):
         msg = None
         try:
             msg = self._sock_file.readline()
         except:
-            raise Exception("Can not read massage from client.")
+            self.crash = True
+            raise ClientSocketError(self, "Can not read massage from client.")
         return msg
 
     def send(self, msg):
@@ -137,7 +158,8 @@ class ClientSocket:
             self._sock_file.write("{}\n".format(msg))
             self._sock_file.flush()
         except:
-            raise Exception("Can not send massage to client.")
+            self.crash = True
+            raise ClientSocketError(self, "Can not send massage to client.")
 
     def send_and_receive(self, msg):
         self.send(msg)
@@ -197,24 +219,24 @@ def play_match_game(game_id, black, white, setting):
     sgf_path = os.path.join(*config.SGF_DIR_PATH)
     move_history = list() # move, time_left and analysis
 
-    for player in players.values():
-        # Request each clients to initialize the game also
-        # create new socket file.
-        player.create_sockfile()
-        player.request_setup(
-            setting["board_size"],
-            setting["komi"],
-            setting["main_time"] * 1000,
-            players[brd.WHITE].name,
-            players[brd.BLACK].name
-        )
-
     # We record the starting in the the date.
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     board = brd.Board(setting["board_size"], setting["komi"])
     result_status = dict()
 
     try:
+        for player in players.values():
+            # Request each clients to initialize the game also
+            # create new socket file.
+            player.create_sockfile()
+            player.request_setup(
+                setting["board_size"],
+                setting["komi"],
+                setting["main_time"] * 1000,
+                players[brd.WHITE].name,
+                players[brd.BLACK].name
+            )
+
         while True:
             side_to_move = board.to_move
             opp_to_move = get_opp_color(board.to_move)
@@ -319,24 +341,26 @@ def play_match_game(game_id, black, white, setting):
                                                 abs(black_score)
                                             )
                 break
+        black.request_gameover(date, result, err)
+        white.request_gameover(date, result, err)
+
     except:
-        # TODO: Catch the error string and reture it to
-        #       master.
         result_status["winner"] = brd.EMPTY
-        result_status["type"] = "no result"
+        result_status["type"] = "socket error"
         result_status["info"] = "0"
 
     result = result_status["info"]
     err = str()
 
-    black.request_gameover(date, result, err)
-    white.request_gameover(date, result, err)
-
     # Close the socket file because the we can not push socket file
-    # onto process queue. 
+    # onto process queue.
     for player in players.values():
-        player.close_sockfile()
+        try:
+           player.close_sockfile()
+        except:
+            pass
 
+    # Always save the SGF file here.
     sgf = make_sgf(
               board.board_size,
               board.komi,
