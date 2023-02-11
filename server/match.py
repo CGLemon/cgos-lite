@@ -13,6 +13,7 @@ class ClientSocketError(Exception):
     def __init__(self, who, msg):
         self.who = who
         self.msg = msg
+        who.crash = True
 
     def __str__(self):
         return repr(self.msg)
@@ -24,6 +25,8 @@ class ClientSocket:
         self._sock_file = None
         self.fid = None
         self.support_analysis = False
+
+        # We should remove the client later if crash is true.
         self.crash = False
 
     def setup_socket(self, sock):
@@ -41,7 +44,6 @@ class ClientSocket:
             parameters = msg.split()
             self.support_analysis = "genmove_analyze" in parameters
         else:
-            self.crash = True
             raise ClientSocketError(self, "Do not soppurt this client version.")
 
         self.name = self.request_username().strip()
@@ -119,7 +121,9 @@ class ClientSocket:
             self.sock = None
             self.fid = None
         except:
-            self.crash = True
+            # Invalid the socket if we can not close it.
+            self.sock = None
+            self.fid = None
             raise ClientSocketError(self, "Can not close the client socket.")
 
     def create_sockfile(self):
@@ -129,7 +133,6 @@ class ClientSocket:
         try:
             self._sock_file = self.sock.makefile("rw", encoding="utf-8")
         except:
-            self.crash = True
             raise ClientSocketError(self, "Can not create the socket file.")
 
     def close_sockfile(self):
@@ -141,7 +144,8 @@ class ClientSocket:
                 self._sock_file.close()
             self._sock_file = None
         except:
-            self.crash = True
+            # Invalid the socket file if we can not close it.
+            self._sock_file = None
             raise ClientSocketError(self, "Can not close the socket file.")
 
     def receive(self):
@@ -149,8 +153,11 @@ class ClientSocket:
         try:
             msg = self._sock_file.readline()
         except:
-            self.crash = True
             raise ClientSocketError(self, "Can not read massage from client.")
+        if len(msg) == 0:
+            # Receive the empty string. It means the
+            # client is closed.
+            raise ClientSocketError(self, "The client is closed.")
         return msg
 
     def send(self, msg):
@@ -158,7 +165,6 @@ class ClientSocket:
             self._sock_file.write("{}\n".format(msg))
             self._sock_file.flush()
         except:
-            self.crash = True
             raise ClientSocketError(self, "Can not send massage to client.")
 
     def send_and_receive(self, msg):
@@ -166,6 +172,11 @@ class ClientSocket:
         return self.receive()
 
 def play_match_game(game_id, black, white, setting):
+    # Play a match game and save the SGF file. The client may
+    # crash here. We detect it and guarantee that the client can
+    # return back safely. The socket is not closed here when
+    # crashing. The master will close it later.
+
     def color_to_char(c):
         if c == brd.BLACK:
             return 'b'
@@ -214,13 +225,14 @@ def play_match_game(game_id, black, white, setting):
         brd.WHITE : white
     }
 
+    # We record the starting time in the date.
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
     sgf_clock_time = time.time()
-    sgf_name = "{}(B)_{}(W)_gid{}.sgf".format(black.name, white.name, game_id)
+    sgf_name = "{}_{}(B)_{}(W)_gid{}.sgf".format(date, black.name, white.name, game_id)
     sgf_path = os.path.join(*config.SGF_DIR_PATH)
     move_history = list() # move, time_left and analysis
 
-    # We record the starting in the the date.
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
     board = brd.Board(setting["board_size"], setting["komi"])
     result_status = dict()
 
@@ -341,10 +353,8 @@ def play_match_game(game_id, black, white, setting):
                                                 abs(black_score)
                                             )
                 break
-        black.request_gameover(date, result, err)
-        white.request_gameover(date, result, err)
-
     except:
+        # TODO: Catch the error and write it into the SGF file.
         result_status["winner"] = brd.EMPTY
         result_status["type"] = "socket error"
         result_status["info"] = "0"
@@ -352,12 +362,20 @@ def play_match_game(game_id, black, white, setting):
     result = result_status["info"]
     err = str()
 
+    for player in players.values():
+        try:
+           # Send the last request to server here in order
+           # to check whether the socket is still connected.
+           player.request_gameover(date, result, err)
+        except ClientSocketError as e:
+            pass
+
     # Close the socket file because the we can not push socket file
     # onto process queue.
     for player in players.values():
         try:
            player.close_sockfile()
-        except:
+        except ClientSocketError as e:
             pass
 
     # Always save the SGF file here.
@@ -373,7 +391,6 @@ def play_match_game(game_id, black, white, setting):
           )
     with open(os.path.join(sgf_path, sgf_name), 'w') as f:
         f.write(sgf)
-
 
 def match_loop(process_id, ready_queue, finished_queue):
     match_threads = dict()

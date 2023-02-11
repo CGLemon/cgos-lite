@@ -15,7 +15,9 @@ class MasterSocket:
         # The processes run the match games.
         self.process_pool = list() 
 
-        # Record current the match game and clients status.
+        # Record current the match game and clients status. We may
+        # find any game status from 'game_tasks' and find every
+        # clients in the 'client_pool'.
         self.game_tasks = dict()
         self.client_pool = dict()
 
@@ -128,8 +130,13 @@ class MasterSocket:
                 self.logger.info(outs_info)
 
         for fid, v in self.client_pool.items():
-            # Check the crash socket.
-            if v["socket"].crash:
+            # Check the crashed socket.
+            c = v["socket"]
+            if c.crash:
+                outs_info = "The socket {} (\"{}\") is crashing.".format(
+                                c.fid, c.name
+                            )
+                self.logger.info(outs_info)
                 self.should_remove_fids.add(fid)
 
         for fid in self.should_remove_fids:
@@ -221,11 +228,18 @@ class MasterSocket:
                 for k, v in self.client_pool.items():
                     #TODO: better information format
                     out_info = "    fid: {} -> {}, {}, {}, {}".format(
-                                   k, v["socket"].name, v["status"], v["gid"], v["pid"])
+                                   k, v["socket"].name, v["status"], v["gid"], v["pid"]
+                               )
                     self.logger.info(out_info)
             elif cmd_list.get(1, None) == "process":
                 for p in self.process_pool:
                     self.logger.info("    pid: {} -> {}".format(p["pid"], p["load"]))
+            elif cmd_list.get(1, None) == "game":
+                for k, v in self.game_tasks.items():
+                    out_info = "    gid: {} -> {}".format(
+                                   k, v["pid"]
+                               )
+                    self.logger.info(out_info)
             else:
                 self.logger.info("Unknown parameter.")
 
@@ -264,6 +278,7 @@ class MasterSocket:
                 for c in cmd_list_raw:
                     field = None
                     if i == 2 or i == 3:
+                        # Set the black player and white player.
                         names = ["black", "white"]
                         try:
                             fid = int(c) # may fail here
@@ -312,6 +327,7 @@ class MasterSocket:
                     self.client_pool[fid]["gid"] = task["gid"]
                     self.client_pool[fid]["pid"] = task["pid"]
 
+                # Save the task.
                 self.game_tasks[task["gid"]] = task
 
                 outs_info = "The new match game {} in the process {}, {}(B) vs {}(W).".format(
@@ -338,10 +354,24 @@ class MasterSocket:
             # Collect the finished clients from queue. Reset the
             # clients status to waiting.
             task = self.finished_queue.get(block=True, timeout=0.1)
-            black, white, pid = task["black"], task["white"], task["pid"]
+            black, white, pid, gid = task["black"], task["white"], task["pid"], task["gid"]
+
+            # The task is finished. Reduce the load.
             self.process_pool[pid]["load"] -= 1
+
+            # The fids return to waiting status. 
             self.waiting_clients.update({black.fid, white.fid})
+
+            # Copy the clients status to pool.
+            self.client_pool[black.fid]["socket"] = black
+            self.client_pool[white.fid]["socket"] = white
+
+            # Remove the task.
+            self.game_tasks.pop(gid, None)
+
             for fid in [black.fid, white.fid]:
+                # The match game is over. The client returns to
+                # waiting status. We also clean all the other status.
                 self.client_pool[fid]["status"] = "waiting"
                 self.client_pool[fid]["pid"] = None
                 self.client_pool[fid]["gid"] = None

@@ -32,7 +32,6 @@ Set the value in the ```config.py```
 ## TODO
 
 * Support the Jappenese rule.
-* Handle the disconnect issue.
 * Start the match game from disconnect time.
 
 ## LICENSE
