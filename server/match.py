@@ -7,7 +7,7 @@ import json
 import os
 
 import board as brd
-from sgf import make_sgf
+from sgf import make_sgf, parse_sgf
 
 class ClientSocketError(Exception):
     def __init__(self, who, msg):
@@ -52,6 +52,14 @@ class ClientSocket:
         # Close the socket file because the we can not push socket file
         # onto process queue. 
         self.close_sockfile()
+
+    def request_poll(self):
+        # Not a stand protocal. The effect is to
+        # check the socket network connection status.
+        try:
+            self.request_username()
+        except ClientSocketError as e:
+            pass
 
     def request_info(self, info):
         # Send the information to client. The client should
@@ -171,49 +179,50 @@ class ClientSocket:
         self.send(msg)
         return self.receive()
 
+def color_to_char(c):
+    if c == brd.BLACK:
+        return 'b'
+    return 'w'
+
+def get_opp_color(c):
+    if c == brd.BLACK:
+        return brd.WHITE
+    return brd.BLACK
+
+def move_to_vertex(board, move, support_analysis):
+    move = move.strip()
+    analysis = None
+    if support_analysis:
+        # Parse and validate analyze info.
+        tokens = move.split(None, 1)
+        move = tokens[0]
+        if len(tokens) > 1:
+            try:
+                info = json.loads(tokens[1])
+                analysis = json.dumps(info, indent=None, separators=(",", ":"))
+            except:
+                pass
+    vertex = brd.NULL_VERTEX
+    move = move.lower()
+
+    if move == "pass":
+        vertex = brd.PASS
+    elif move == "resign":
+        vertex = brd.RESIGN
+    else:
+        x = ord(move[0]) - (ord('A') if ord(move[0]) < ord('a') else ord('a'))
+        y = int(move[1:]) - 1
+        if x >= 8:
+            x -= 1
+        vertex = board.get_vertex(x,y)
+    return move, vertex, analysis
+
+
 def play_match_game(game_id, black, white, setting):
     # Play a match game and save the SGF file. The client may
     # crash here. We detect it and guarantee that the client can
     # return back safely. The socket is not closed here when
     # crashing. The master will close it later.
-
-    def color_to_char(c):
-        if c == brd.BLACK:
-            return 'b'
-        return 'w'
-
-    def get_opp_color(c):
-        if c == brd.BLACK:
-            return brd.WHITE
-        return brd.BLACK
-
-    def move_to_vertex(board, move, support_analysis):
-        move = move.strip()
-        analysis = None
-        if support_analysis:
-            # Parse and validate analyze info.
-            tokens = move.split(None, 1)
-            move = tokens[0]
-            if len(tokens) > 1:
-                try:
-                    info = json.loads(tokens[1])
-                    analysis = json.dumps(info, indent=None, separators=(",", ":"))
-                except:
-                    pass
-        vertex = brd.NULL_VERTEX
-        move = move.lower()
-
-        if move == "pass":
-            vertex = brd.PASS
-        elif move == "resign":
-            vertex = brd.RESIGN
-        else:
-            x = ord(move[0]) - (ord('A') if ord(move[0]) < ord('a') else ord('a'))
-            y = int(move[1:]) - 1
-            if x >= 8:
-                x -= 1
-            vertex = board.get_vertex(x,y)
-        return move, vertex, analysis
 
     # Initialize some basic data.
     time_lefts = {
@@ -233,6 +242,15 @@ def play_match_game(game_id, black, white, setting):
     sgf_path = os.path.join(*config.SGF_DIR_PATH)
     move_history = list() # move, time_left and analysis
 
+    sgf_source = setting.get("sgf", None)
+    if (sgf_source is not None) and (os.path.isfile(sgf_source)):
+        with open(sgf_source, 'r') as f:
+            sgf = f.read().strip()
+            board_size, komi, move_history = parse_sgf(sgf)
+            # Rewrite the game setting.
+            setting["board_size"] = board_size
+            setting["komi"] = komi
+
     board = brd.Board(setting["board_size"], setting["komi"])
     result_status = dict()
 
@@ -248,6 +266,26 @@ def play_match_game(game_id, black, white, setting):
                 players[brd.WHITE].name,
                 players[brd.BLACK].name
             )
+
+        while len(move_history) > board.move_num:
+            # Play the moves from SGF file.
+            side_to_move = board.to_move
+            to_move_player = players[side_to_move]
+            move, time_left, _ = move_history[board.move_num] 
+
+            move, vertex, _ = move_to_vertex(
+                                  board, move, False
+                              )
+
+            # Always assuem the move is legel.
+            board.play(vertex)
+
+            for player in players.values(): 
+                player.request_play(
+                    color_to_char(side_to_move),
+                    board.vertex_to_text(vertex),
+                    int(time_left * 1000)
+                )
 
         while True:
             side_to_move = board.to_move
@@ -433,7 +471,8 @@ def match_loop(process_id, ready_queue, finished_queue):
         setting = {
             "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
             "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
-            "komi"       : task.get("komi", config.DEFAULT_KOMI)
+            "komi"       : task.get("komi", config.DEFAULT_KOMI),
+            "sgf"        : task.get("sgf", None)
         }
 
         # New game is starting. Each threads hold one game. The threads

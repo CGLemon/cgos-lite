@@ -129,6 +129,17 @@ class MasterSocket:
                             )
                 self.logger.info(outs_info)
 
+        keys = list(self.waiting_clients)
+        if len(keys) >= 1:
+            # Check the network connection.
+            random.shuffle(keys)
+            check_fid = keys[0]
+            c = self.client_pool.get(check_fid, None)
+            if c is not None:
+                c["socket"].create_sockfile()
+                c["socket"].request_poll()
+                c["socket"].close_sockfile()
+
         for fid, v in self.client_pool.items():
             # Check the crashed socket.
             c = v["socket"]
@@ -151,6 +162,14 @@ class MasterSocket:
                 pass
         self.should_remove_fids.clear()
 
+        # Synchronize the waiting_clients here. Remove
+        # the closed socket fids.
+        keys = list(self.waiting_clients)
+        for fid in keys:
+            c = self.client_pool.get(fid, None)
+            if c is None:
+                self.waiting_clients.remove(fid)
+
     def handle_command(self, commands_queue):
         if len(commands_queue) == 0:
             return
@@ -165,14 +184,6 @@ class MasterSocket:
         for i in range(len(cmd_list_raw)):
             cmd_list[i] = cmd_list_raw[i]
         cmd_list["main"] = cmd_list_raw[0]
-
-        # Synchronize the waiting_clients here. Remove
-        # the closed socket fids.
-        wc_list = list(self.waiting_clients)
-        for fid in wc_list:
-            c = self.client_pool.get(fid, None)
-            if c is None:
-                self.waiting_clients.remove(fid)
 
         self.logger.info("Get command [\"{}\"]...".format(cmd))
 
@@ -266,17 +277,25 @@ class MasterSocket:
                     self.waiting_clients.remove(fid)
                     task[name] = self.client_pool[fid]["socket"]
             elif cmd_list.get(1, None) == "fid":
-                # Keep to get the setting paramter. Must provide black
-                # fid and white fid. Two fids must be different. Others
-                # are optional. The format is
+                # Keep to get the field paramters. Must provide black
+                # fid and white fid. Two fids must be different. Other
+                # fields are optional.
                 #
-                # match fid 100 200
-                # match fid 100 200 bsize 17
-                # match fid 100 200 mtime 900 bsize 19 komi 7.5
+                # The supported fields are here.
+                #     bsize: the board size
+                #      komi: the gama komi
+                #     mtime: the game main time in second
+                #       sgf: the source of sgf name, starting the match
+                #            from it
+                #
+                # The format samples are here.
+                #     match fid 100 200
+                #     match fid 100 200 bsize 17
+                #     match fid 100 200 mtime 900 bsize 19 komi 7.5
 
                 i = 0
+                field = None
                 for c in cmd_list_raw:
-                    field = None
                     if i == 2 or i == 3:
                         # Set the black player and white player.
                         names = ["black", "white"]
@@ -299,6 +318,8 @@ class MasterSocket:
                                 task["board_size"] = int(c) # get board size
                             elif field == "komi":
                                 task["komi"] = float(c) # get komi
+                            elif field == "sgf":
+                                task["sgf"] = c
                             field = None # clean the field
                     i += 1
             else:

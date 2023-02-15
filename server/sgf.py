@@ -24,6 +24,76 @@
 
 import json
 
+def parse_sgf(sgf):
+    def ignored_char(char):
+        return ord(char) in [ord('\t'), ord('\n'), ord('\r'), ord('\\')]
+
+    def get_key_value(sgf, curr):
+        p0 = sgf.find('[', curr);
+        p1 = sgf.find(']', curr);
+        key = sgf[curr:p0]
+        val = sgf[p0+1:p1]
+        return key, val, p1
+
+    colstr = ["B", "W"]
+
+    board_size = None
+    komi = None
+
+    task = dict()
+    history = list()
+    curr = -1
+ 
+    while curr < len(sgf)-1:
+        curr += 1
+        token = sgf[curr]
+
+        if ignored_char(token):
+            continue
+
+        if ord(token) == ord(';'):
+            if len(task) > 0:
+                move = task.get("move", None)
+                time_left = task.get("time_left", None)
+                analysis = task.get("analysismove", None)
+                history.append((move, time_left, analysis ))
+                task = dict()
+            continue
+
+        if ord(token) == ord('('):
+            continue
+
+        if ord(token) == ord(')'):
+            continue
+
+        key, value, curr = get_key_value(sgf, curr)
+
+        if key == "SZ":
+            board_size = int(value)
+        elif key == "KM":
+            komi = float(value)
+        elif key in ["B", "W"]:
+            if len(value) == 0:
+                task["move"] = "pass"
+            else:
+                x = value[0].upper()
+                if ord(x) >= ord('I'):
+                    x = chr(ord(x) + 1)
+                y = ord(value[1]) - ord('a') + 1
+                task["move"] = "{}{}".format(x,y)
+        elif key in ["BL", "WL"]:
+            task["time_left"] = int(value)
+        elif key == "CC":
+            task["analysis"] = value
+
+    if len(task) > 0:
+        move = task.get("move", None)
+        time_left = task.get("time_left", None)
+        analysis = task.get("analysismove", None)
+        history.append((move, time_left, analysis ))
+        task = dict()
+    return board_size, komi, history
+
 def make_sgf(
     board_size,
     komi,
@@ -78,8 +148,7 @@ def make_sgf(
             ccs = ord(move.lower()[0])
             if ccs > 104:
                 ccs -= 1
-            rrs = int(move[1:])
-            rrs = (board_size - rrs) + 97
+            rrs = int(move[1:]) + ord('a') - 1
             sgf += ";{}[{}{}]{}L[{}]".format(
                        colstr[to_move],
                        chr(ccs),
@@ -101,14 +170,12 @@ def make_sgf(
                        )
             sgf += "\n"
             i = 0
+        i += 1
+        to_move = to_move ^ 1
 
         if i > 7:
             sgf += "\n"
             i = 0
-
-        i += 1
-        to_move = to_move ^ 1
-
     sgf += ")\n"
 
     return sgf
