@@ -18,8 +18,8 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
         * Randomly select two waiting clients for match game.
     * ```fid (black fid) (white fid) [optional...]```
         * Select two waiting clients for match game via fids. Other fields are optional.
-        * ```bsize````: The game board size.
-        * ```komi````: The gama komi.
+        * ```bsize```: The game board size.
+        * ```komi```: The gama komi.
         * ```mtime```: The game main time in second.
         * ```sgf```: The source of sgf name, starting the match  from it.
 * ```file [filename]```: Read the batched commands from file.
