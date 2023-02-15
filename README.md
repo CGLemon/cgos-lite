@@ -10,20 +10,26 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
 
     python3 cgos-lite
 
-## Support Command
+## Support Commands
 
 * ```quit``` : End the server.
-* ```match random```: Randomly select two waiting clients for the match game.
-* ```match fid (black fid) (white fid)```: Select two waiting clients for the match game with socket id.
-* ```show client```: Show the all waiting socket ids and names.
+* ```match```
+    * ```random```
+        * Randomly select two waiting clients for match game.
+    * ```fid (black fid) (white fid) [optional...]```
+        * Select two waiting clients for match game via fids. Other fields are optional.
+        * ```bsize````: The game board size.
+        * ```komi````: The gama komi.
+        * ```mtime```: The game main time in second.
+        * ```sgf```: The source of sgf name, starting the match  from it.
 * ```file [filename]```: Read the batched commands from file.
 
 ## Configure
 
-Set the value in the ```config.py```
+Set these values in the ```config.py```
 
 * ```SERVER_PORT``` : The server port.
-* ```NUM_WORKERS``` : How main cores do we use.
+* ```NUM_WORKERS``` : How many cores do we use.
 * ```DEFAULT_MAIN_SECOND``` : The default thinking time if we do not specify a value in the match.
 * ```DEFAULT_BOARD_SIZE``` : The default board size if we do not specify a value in the match.
 * ```DEFAULT_KOMI``` : The default komi if we do not specify a value in the match.
@@ -32,7 +38,6 @@ Set the value in the ```config.py```
 ## TODO
 
 * Support the Jappenese rule.
-* Start the match game from disconnect time.
 
 ## LICENSE
 
