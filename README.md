@@ -13,6 +13,7 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
 ## Support Commands
 
 * ```quit``` : End the server.
+* ```show client```: Show the status of clients.
 * ```match```
     * ```random```
         * Randomly select two waiting clients for match game.
@@ -21,7 +22,8 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
         * ```bsize```: The game board size.
         * ```komi```: The gama komi.
         * ```mtime```: The game main time in second.
-        * ```sgf```: The source of sgf name, starting the match  from it.
+        * ```sgf```: The source of SGF name, starting the match  from it.
+        * The sample is like ```match fid 1 2 mtime 900 bsize 19 komi 7.5```.
 * ```file [filename]```: Read the batched commands from file.
 
 ## Configure
@@ -38,6 +40,7 @@ Set these values in the ```config.py```
 ## TODO
 
 * Support the Jappenese rule.
+* GUI for the user.
 
 ## LICENSE
 

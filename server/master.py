@@ -96,6 +96,11 @@ class MasterSocket:
         return logger
 
     def handle_clients(self):
+        # Can only change the client connection status
+        # here. The buffer 'should_remove_fids' contains
+        # the fids which we want remove. We should close
+        # these fids and clear the buffer here.
+
         read_list = [self.server_sock]
         readable, _, err = select.select(read_list, [], read_list, 0.1)
 
@@ -121,8 +126,8 @@ class MasterSocket:
                 self.client_pool[fid] = {
                     "socket" : c,
                     "status" : "waiting",
-                    "pid"    : None,
-                    "gid"    : None
+                    "gid"    : None, # game id
+                    "pid"    : None  # process id
                 }
                 outs_info = "The socket {} (\"{}\") connects to the server.".format(
                                 fid, c.name
@@ -131,6 +136,9 @@ class MasterSocket:
 
         keys = list(self.waiting_clients)
         if len(keys) >= 1:
+            # TODO: Need a better algorithm to select
+            #       sockets.
+
             # Check the network connection.
             random.shuffle(keys)
             check_fid = keys[0]
@@ -171,7 +179,11 @@ class MasterSocket:
                 self.waiting_clients.remove(fid)
 
     def handle_command(self, commands_queue):
+        # Fetch the last command from the 'commands_queue'
+        # and execute it here.
+
         if len(commands_queue) == 0:
+            # There is no command now.
             return
 
         cmd = commands_queue.pop(0)
@@ -236,10 +248,22 @@ class MasterSocket:
         elif cmd_list["main"] == "show":
             # Show some server status.
             if cmd_list.get(1, None) == "client":
+                out_info = "{:>15} {:>12} {:>8} {:>8} {:>8}".format(
+                               "name", "status", "fid", "gid", "pid"
+                           )
+                self.logger.info(out_info)
                 for k, v in self.client_pool.items():
-                    #TODO: better information format
-                    out_info = "    fid: {} -> {}, {}, {}, {}".format(
-                                   k, v["socket"].name, v["status"], v["gid"], v["pid"]
+                    # The 'fid' is socket (file) id.
+                    # The 'gid' is game id. If it is None, it is waiting status.
+                    # The 'pid' is process id. If it is None, it is waiting status.
+                    gid = "None"
+                    if v["gid"] is not None:
+                        gid = v["gid"]
+                    pid = "None"
+                    if v["pid"] is not None:
+                        pid = v["pid"]
+                    out_info = "{:>15} {:>12} {:>8} {:>8} {:>8}".format(
+                                   v["socket"].name, v["status"], k, gid, pid
                                )
                     self.logger.info(out_info)
             elif cmd_list.get(1, None) == "process":
@@ -256,14 +280,15 @@ class MasterSocket:
 
         elif cmd_list["main"] == "match":
             # The "match" command will select two waiting clients
-            # for match game. Here are the valid commands
+            # for the match game. Here are the valid commands
             #     "random" : randomly select two clients
             #     "fid"    : select two clients with socket id
             keys = list(self.waiting_clients)
             task = {
+                "type"  : "match",
                 "black" : None,
                 "white" : None,
-                "gid" : self.last_game_id
+                "gid"   : self.last_game_id
             }
 
             if len(keys) <= 1:
@@ -289,9 +314,9 @@ class MasterSocket:
                 #            from it
                 #
                 # The format samples are here.
-                #     match fid 100 200
-                #     match fid 100 200 bsize 17
-                #     match fid 100 200 mtime 900 bsize 19 komi 7.5
+                #     match fid 1 2
+                #     match fid 1 2 bsize 17
+                #     match fid 1 2 mtime 900 bsize 19 komi 7.5
 
                 i = 0
                 field = None
@@ -325,6 +350,43 @@ class MasterSocket:
             else:
                 self.logger.info("Unknown parameter.")
 
+            # Try to push the task into ready queue. 
+            self.try_push_task(task)
+        else:
+            self.logger.info("Invalid command [{}]...".format(cmd))
+
+    def handle_finished_clients(self):
+        try:
+            # Collect the finished clients from queue. Reset the
+            # clients status to waiting.
+            task = self.finished_queue.get(block=True, timeout=0.1)
+            black, white, pid, gid = task["black"], task["white"], task["pid"], task["gid"]
+
+            # The task is finished. Reduce the load.
+            self.process_pool[pid]["load"] -= 1
+
+            # The fids return to waiting status. 
+            self.waiting_clients.update({black.fid, white.fid})
+
+            # Copy the clients status to pool.
+            self.client_pool[black.fid]["socket"] = black
+            self.client_pool[white.fid]["socket"] = white
+
+            # Remove the task.
+            self.game_tasks.pop(gid, None)
+
+            for fid in [black.fid, white.fid]:
+                # The match game is over. The client returns to
+                # waiting status. We also clean all the other status.
+                self.client_pool[fid]["status"] = "waiting"
+                self.client_pool[fid]["pid"] = None
+                self.client_pool[fid]["gid"] = None
+            self.logger.info("The match game {} is over.".format(task["gid"]))
+        except queue.Empty:
+            pass
+
+    def try_push_task(self, task):
+        if task["type"] == "match":
             if task.get("black", None) is not None and \
                    task.get("white", None) is not None:
                 # Select the lowest load process in order to
@@ -367,38 +429,6 @@ class MasterSocket:
                     self.waiting_clients.add(black.fid)
                 if white is not None:
                     self.waiting_clients.add(white.fid)
-        else:
-            self.logger.info("Invalid command [{}]...".format(cmd))
-
-    def handle_finished_clients(self):
-        try:
-            # Collect the finished clients from queue. Reset the
-            # clients status to waiting.
-            task = self.finished_queue.get(block=True, timeout=0.1)
-            black, white, pid, gid = task["black"], task["white"], task["pid"], task["gid"]
-
-            # The task is finished. Reduce the load.
-            self.process_pool[pid]["load"] -= 1
-
-            # The fids return to waiting status. 
-            self.waiting_clients.update({black.fid, white.fid})
-
-            # Copy the clients status to pool.
-            self.client_pool[black.fid]["socket"] = black
-            self.client_pool[white.fid]["socket"] = white
-
-            # Remove the task.
-            self.game_tasks.pop(gid, None)
-
-            for fid in [black.fid, white.fid]:
-                # The match game is over. The client returns to
-                # waiting status. We also clean all the other status.
-                self.client_pool[fid]["status"] = "waiting"
-                self.client_pool[fid]["pid"] = None
-                self.client_pool[fid]["gid"] = None
-            self.logger.info("The match game {} is over.".format(task["gid"]))
-        except queue.Empty:
-            pass
 
     def close(self):
         try:

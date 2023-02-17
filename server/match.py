@@ -217,7 +217,6 @@ def move_to_vertex(board, move, support_analysis):
         vertex = board.get_vertex(x,y)
     return move, vertex, analysis
 
-
 def play_match_game(game_id, black, white, setting):
     # Play a match game and save the SGF file. The client may
     # crash here. We detect it and guarantee that the client can
@@ -235,13 +234,15 @@ def play_match_game(game_id, black, white, setting):
     }
 
     # We record the starting time in the date.
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     sgf_clock_time = time.time()
-    sgf_name = "{}_{}(B)_{}(W)_gid{}.sgf".format(date, black.name, white.name, game_id)
+    sgf_name = "{}_{}(B)_{}(W)_g{}.sgf".format(date, black.name, white.name, game_id)
     sgf_path = os.path.join(*config.SGF_DIR_PATH)
-    move_history = list() # move, time_left and analysis
+    move_history = list() # It contains (move, time_left and analysis).
 
+    # Try to read the SGF file. Should start the game from
+    # it if the source is not None.
     sgf_source = setting.get("sgf", None)
     if (sgf_source is not None) and (os.path.isfile(sgf_source)):
         with open(sgf_source, 'r') as f:
@@ -280,6 +281,7 @@ def play_match_game(game_id, black, white, setting):
             # Always assuem the move is legel.
             board.play(vertex)
 
+            # Both clients should play the move.
             for player in players.values(): 
                 player.request_play(
                     color_to_char(side_to_move),
@@ -347,19 +349,20 @@ def play_match_game(game_id, black, white, setting):
             # the move_history. Failed to save it if the client play
             # the move too quick. 
             if time.time() - sgf_clock_time > 5:
-                sgf = make_sgf(
-                          board.board_size,
-                          board.komi,
-                          black.name,
-                          white.name,
-                          setting["main_time"],
-                          date,
-                          move_history,
-                          None,
-                      )
-                with open(os.path.join(sgf_path, sgf_name), 'w') as f:
-                    f.write(sgf)
-                sgf_clock_time = time.time()
+                if os.path.isdir(sgf_path):
+                    sgf = make_sgf(
+                              board.board_size,
+                              board.komi,
+                              black.name,
+                              white.name,
+                              setting["main_time"],
+                              date,
+                              move_history,
+                              None
+                          )
+                    with open(os.path.join(sgf_path, sgf_name), 'w') as f:
+                        f.write(sgf)
+                    sgf_clock_time = time.time()
 
             # Request the opponent to play the move.
             time_left = time_lefts[opp_to_move]
@@ -416,19 +419,20 @@ def play_match_game(game_id, black, white, setting):
         except ClientSocketError as e:
             pass
 
-    # Always save the SGF file here.
-    sgf = make_sgf(
-              board.board_size,
-              board.komi,
-              black.name,
-              white.name,
-              setting["main_time"],
-              date,
-              move_history,
-              result
-          )
-    with open(os.path.join(sgf_path, sgf_name), 'w') as f:
-        f.write(sgf)
+    # Always save the SGF file before leaving.
+    if os.path.isdir(sgf_path):
+        sgf = make_sgf(
+                  board.board_size,
+                  board.komi,
+                  black.name,
+                  white.name,
+                  setting["main_time"],
+                  date,
+                  move_history,
+                  result
+              )
+        with open(os.path.join(sgf_path, sgf_name), 'w') as f:
+            f.write(sgf)
 
 def match_loop(process_id, ready_queue, finished_queue):
     match_threads = dict()
@@ -467,6 +471,8 @@ def match_loop(process_id, ready_queue, finished_queue):
             game_id = task["gid"] # game id
         except queue.Empty:
             continue
+
+        # TODO: Add support for more task type.
 
         setting = {
             "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
