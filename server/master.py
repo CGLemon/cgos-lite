@@ -8,7 +8,8 @@ import logging
 import multiprocessing as mp
 
 import config
-from match import ClientSocket, match_loop
+from match import match_loop
+from client import ClientSocket
 
 class MasterSocket:
     def __init__(self):
@@ -34,6 +35,9 @@ class MasterSocket:
         self.finished_queue = mp.Queue() # All processes share one finished queue.
         self.last_game_id = 0
         self.should_remove_fids = set()
+
+        self.manager_client = None
+        self.manager_queue = queue.Queue()
 
         # Set the logging file.
         self.logger = self.get_and_setup_logging(
@@ -98,7 +102,7 @@ class MasterSocket:
     def handle_clients(self):
         # Can only change the client connection status
         # here. The buffer 'should_remove_fids' contains
-        # the fids which we want remove. We should close
+        # the fids which we want to remove. We should close
         # these fids and clear the buffer here.
 
         read_list = [self.server_sock]
@@ -121,8 +125,23 @@ class MasterSocket:
                 client_sock, _ = self.server_sock.accept()
                 fid = client_sock.fileno()
                 c = ClientSocket()
+
+                # Get the client type here.
                 c.setup_socket(client_sock)
-                self.waiting_clients.add(fid)
+
+                # 'manager' can not play the match game. Should not
+                # add it to 'waiting_clients'.
+                if c.type == "engine":
+                    self.waiting_clients.add(fid)
+                elif c.type == "manager":
+                    if self.manager_client is not None:
+                        self.manager_client = c
+                    else:
+                        # There is a manager. Do not allow add the
+                        # new manager.
+                        c.crash = True
+
+                # Allocate new client status.
                 self.client_pool[fid] = {
                     "socket" : c,
                     "status" : "waiting",
@@ -159,18 +178,23 @@ class MasterSocket:
                 self.should_remove_fids.add(fid)
 
         for fid in self.should_remove_fids:
-            # Don't remove the waiting_clients here because
-            # It may be in the match game. We will synchronize
-            # it later.
+            # Don't remove the fids from 'waiting_clients' here 
+            # because It may be in the match game. We should
+            # synchronize it later and every epoches.
             c = self.client_pool.pop(fid, None)
             try:
                 # Maybe the socket be closed.
                 c["socket"].close()
             except:
                 pass
+
+            # The fid is manager. Set the manager as NULL.
+            if self.manager_client is not None:
+                if fid == self.manager_client.fid:
+                    self.manager_client = None
         self.should_remove_fids.clear()
 
-        # Synchronize the waiting_clients here. Remove
+        # Synchronize the 'waiting_clients' here. Remove
         # the closed socket fids.
         keys = list(self.waiting_clients)
         for fid in keys:
