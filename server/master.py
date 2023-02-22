@@ -30,14 +30,15 @@ class MasterSocket:
         # playing game:    ready_queue_pool => (thread running...) => finished_queue
         # finshed game:      finished_queue => waiting_clients
         # terninate:        waiting_clients => (close the socket)
-        self.waiting_clients = set()
+        self.waiting_clients = set() # Always empty set. Will fill it before scheduling
+                                     # new game.
         self.ready_queue_pool = list() # One process uses one independent ready queue.
         self.finished_queue = mp.Queue() # All processes share one finished queue.
         self.last_game_id = 0
         self.should_remove_fids = set()
 
+        # We can control the master loop by remote manager.
         self.manager_client = None
-        self.manager_queue = queue.Queue()
 
         # Set the logging file.
         self.logger = self.get_and_setup_logging(
@@ -99,6 +100,44 @@ class MasterSocket:
         logger.addHandler(handler)
         return logger
 
+    def fill_waiting_clients(self):
+        self.waiting_clients.clear()
+        for k, v in self.client_pool.items():
+            if v["socket"].type == "engine" and \
+                v["status"] == "waiting":
+                self.waiting_clients.add(k)
+
+    def handle_manager(self, commands_queue):
+        if self.manager_client is None:
+            break
+
+        sock = self.manager_client.sock
+        i = 0
+        max_tasks = 10
+
+        while True:
+            readable, _, _ = select.select([sock], [], [], 0)
+            if not readable:
+                break
+
+            cmd = self.manager_client.receive()
+            if cmd == "client_status":
+                csize = len(self.client_pool)
+                self.manager_client.send("{}".format(csize))
+                for k, v in self.client_pool.items():
+                    self.manager_client.send("{}".format(v["socket"].name)) # name
+                    self.manager_client.send("{}".format(k))                # fid
+                    self.manager_client.send("{}".format(v["status"]))      # status
+            elif cmd == "task":
+                task = self.manager_client.receive()
+                commands_queue.append(task)
+            else:
+                pass
+
+            i += 1
+            if i >= max_tasks:
+                break
+
     def handle_clients(self):
         # Can only change the client connection status
         # here. The buffer 'should_remove_fids' contains
@@ -129,11 +168,7 @@ class MasterSocket:
                 # Get the client type here.
                 c.setup_socket(client_sock)
 
-                # 'manager' can not play the match game. Should not
-                # add it to 'waiting_clients'.
-                if c.type == "engine":
-                    self.waiting_clients.add(fid)
-                elif c.type == "manager":
+                if c.type == "manager":
                     if self.manager_client is not None:
                         self.manager_client = c
                     else:
@@ -153,6 +188,7 @@ class MasterSocket:
                             )
                 self.logger.info(outs_info)
 
+        self.fill_waiting_clients()
         keys = list(self.waiting_clients)
         if len(keys) >= 1:
             # TODO: Need a better algorithm to select
@@ -178,12 +214,11 @@ class MasterSocket:
                 self.should_remove_fids.add(fid)
 
         for fid in self.should_remove_fids:
-            # Don't remove the fids from 'waiting_clients' here 
-            # because It may be in the match game. We should
-            # synchronize it later and every epoches.
+            # Now close the correspond socket fids.
             c = self.client_pool.pop(fid, None)
             try:
-                # Maybe the socket be closed.
+                # Maybe the socket be closed. Should
+                # catch the exception error.
                 c["socket"].close()
             except:
                 pass
@@ -194,13 +229,6 @@ class MasterSocket:
                     self.manager_client = None
         self.should_remove_fids.clear()
 
-        # Synchronize the 'waiting_clients' here. Remove
-        # the closed socket fids.
-        keys = list(self.waiting_clients)
-        for fid in keys:
-            c = self.client_pool.get(fid, None)
-            if c is None:
-                self.waiting_clients.remove(fid)
 
     def handle_command(self, commands_queue):
         # Fetch the last command from the 'commands_queue'
@@ -307,6 +335,7 @@ class MasterSocket:
             # for the match game. Here are the valid commands
             #     "random" : randomly select two clients
             #     "fid"    : select two clients with socket id
+            self.fill_waiting_clients()
             keys = list(self.waiting_clients)
             task = {
                 "type"  : "match",
@@ -389,9 +418,6 @@ class MasterSocket:
             # The task is finished. Reduce the load.
             self.process_pool[pid]["load"] -= 1
 
-            # The fids return to waiting status. 
-            self.waiting_clients.update({black.fid, white.fid})
-
             # Copy the clients status to pool.
             self.client_pool[black.fid]["socket"] = black
             self.client_pool[white.fid]["socket"] = white
@@ -446,13 +472,7 @@ class MasterSocket:
                 self.logger.info(outs_info)
                 self.last_game_id += 1
             else:
-                # If the task is invalid, return the clients to
-                # waiting list.
-                black, white = task.get("black", None), task.get("white", None)
-                if black is not None:
-                    self.waiting_clients.add(black.fid)
-                if white is not None:
-                    self.waiting_clients.add(white.fid)
+                pass
 
     def close(self):
         try:

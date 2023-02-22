@@ -14,14 +14,17 @@ def master_loop():
             # 1st. Check the connecting clients.
             master.handle_clients()
 
-            # 2nd. Check the input command.
+            # 2nd. Try to receive the command.
+            master.handle_manager(commands_queue)
+
+            # 3rd. Check the input command.
             read_list, _, _ = select.select([sys.stdin], [], [], 0)
             if read_list:
                 cmd = sys.stdin.readline().strip()
                 commands_queue.append(cmd)
             master.handle_command(commands_queue)
 
-            # 3rd. Check the finished clients.
+            # 4th. Check the finished clients.
             master.handle_finished_clients()
     finally:
         master.close()
