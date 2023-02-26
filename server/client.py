@@ -10,6 +10,10 @@ class ClientSocketError(Exception):
         return repr(self.msg)
 
 class ClientSocket:
+    # It is lazy client. The client can not send any
+    # information to server spontaneously. It must
+    # wait for commands of server.
+
     def __init__(self):
         self.name = None
         self.sock = None
@@ -62,6 +66,15 @@ class ClientSocket:
             self.request_username()
         except ClientSocketError as e:
             pass
+
+    def request_queries(self):
+        # It is for manager client. Try get query from
+        # client.
+        return self.send_and_receive("queries")
+
+    def request_client_status(self, status):
+        # It is for manager client.
+        return self.send("status {}".format(status))
 
     def request_info(self, info):
         # Send the information to client. The client should
@@ -180,4 +193,3 @@ class ClientSocket:
     def send_and_receive(self, msg):
         self.send(msg)
         return self.receive()
-

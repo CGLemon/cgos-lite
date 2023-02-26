@@ -5,6 +5,7 @@ import random
 import os
 import sys
 import logging
+import json
 import multiprocessing as mp
 
 import config
@@ -107,36 +108,40 @@ class MasterSocket:
                 v["status"] == "waiting":
                 self.waiting_clients.add(k)
 
-    def handle_manager(self, commands_queue):
+    def parse_queries(self, raw_queries, commands_queue):
         if self.manager_client is None:
-            break
+            return
+        if len(raw_queries) == 0:
+            return
 
-        sock = self.manager_client.sock
-        i = 0
-        max_tasks = 10
-
-        while True:
-            readable, _, _ = select.select([sock], [], [], 0)
-            if not readable:
-                break
-
-            cmd = self.manager_client.receive()
-            if cmd == "client_status":
-                csize = len(self.client_pool)
-                self.manager_client.send("{}".format(csize))
-                for k, v in self.client_pool.items():
-                    self.manager_client.send("{}".format(v["socket"].name)) # name
-                    self.manager_client.send("{}".format(k))                # fid
-                    self.manager_client.send("{}".format(v["status"]))      # status
-            elif cmd == "task":
-                task = self.manager_client.receive()
-                commands_queue.append(task)
+        queries = json.loads(raw_queries)
+        for k, v in queries.item():
+            if k == "client_status":
+                outputs = dict()
+                for kk, vv in self.client_pool.items():
+                    # The 'kk' is fid. 
+                    outputs[kk] = [
+                        "{}".format(v["socket"].name), # name
+                        "{}".format(v["status"])       # status
+                    ]
+                outputs = json.dumps(outputs, indent=None, separators=(',', ':'))
+                self.manager_client.request_client_status(outputs)
+            elif k == "command":
+                command = v
+                commands_queue.append(command)
             else:
                 pass
 
-            i += 1
-            if i >= max_tasks:
-                break
+    def handle_manager(self, commands_queue):
+        if self.manager_client is None:
+            return
+
+        self.manager_client.create_sockfile()
+        self.parse_queries(
+            self.manager_client.request_queries(),
+            commands_queue
+        )
+        self.manager_client.close_sockfile()
 
     def handle_clients(self):
         # Can only change the client connection status
@@ -251,6 +256,8 @@ class MasterSocket:
 
         self.logger.info("Get command [\"{}\"]...".format(cmd))
 
+        # TODO: Use the multi-funtion instead of this long
+        #       funtion inorder to simplify it.
         if cmd_list["main"] == "quit":
             # End the program.
             for k, v in self.client_pool.items():
@@ -296,7 +303,6 @@ class MasterSocket:
                     while len(line) != 0:
                         commands_queue.append(line.strip())
                         line = f.readline()
-
         elif cmd_list["main"] == "show":
             # Show some server status.
             if cmd_list.get(1, None) == "client":
