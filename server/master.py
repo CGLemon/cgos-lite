@@ -115,14 +115,14 @@ class MasterSocket:
             return
 
         queries = json.loads(raw_queries)
-        for k, v in queries.item():
+        for k, v in queries.items():
             if k == "client_status":
                 outputs = dict()
                 for kk, vv in self.client_pool.items():
                     # The 'kk' is fid. 
                     outputs[kk] = [
-                        "{}".format(v["socket"].name), # name
-                        "{}".format(v["status"])       # status
+                        "{}".format(vv["socket"].name), # name
+                        "{}".format(vv["status"])       # status
                     ]
                 outputs = json.dumps(outputs, indent=None, separators=(',', ':'))
                 self.manager_client.request_client_status(outputs)
@@ -174,7 +174,7 @@ class MasterSocket:
                 c.setup_socket(client_sock)
 
                 if c.type == "manager":
-                    if self.manager_client is not None:
+                    if self.manager_client is None:
                         self.manager_client = c
                     else:
                         # There is a manager. Do not allow add the

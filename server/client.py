@@ -74,7 +74,7 @@ class ClientSocket:
 
     def request_client_status(self, status):
         # It is for manager client.
-        return self.send("status {}".format(status))
+        return self.send("client_status {}".format(status))
 
     def request_info(self, info):
         # Send the information to client. The client should
@@ -181,7 +181,7 @@ class ClientSocket:
             # Receive the empty string. It means the
             # client is closed.
             raise ClientSocketError(self, "The client is closed.")
-        return msg
+        return msg.strip()
 
     def send(self, msg):
         try:
