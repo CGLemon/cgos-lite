@@ -10,7 +10,7 @@ import multiprocessing as mp
 
 import config
 from match import match_loop
-from client import ClientSocket
+from client import ClientSocket, ClientSocketError
 
 class MasterSocket:
     def __init__(self):
@@ -122,6 +122,7 @@ class MasterSocket:
                     # The 'kk' is fid. 
                     outputs[kk] = [
                         "{}".format(vv["socket"].name), # name
+                        "{}".format(vv["socket"].type), # type
                         "{}".format(vv["status"])       # status
                     ]
                 outputs = json.dumps(outputs, indent=None, separators=(',', ':'))
@@ -136,12 +137,15 @@ class MasterSocket:
         if self.manager_client is None:
             return
 
-        self.manager_client.create_sockfile()
-        self.parse_queries(
-            self.manager_client.request_queries(),
-            commands_queue
-        )
-        self.manager_client.close_sockfile()
+        try:
+            self.manager_client.create_sockfile()
+            self.parse_queries(
+                self.manager_client.request_queries(),
+                commands_queue
+            )
+            self.manager_client.close_sockfile()
+        except ClientSocketError as e:
+            pass
 
     def handle_clients(self):
         # Can only change the client connection status
@@ -212,7 +216,7 @@ class MasterSocket:
             # Check the crashed socket.
             c = v["socket"]
             if c.crash:
-                outs_info = "The socket {} (\"{}\") is crashing.".format(
+                outs_info = "The socket {} (\"{}\") was crashing.".format(
                                 c.fid, c.name
                             )
                 self.logger.info(outs_info)
@@ -221,17 +225,18 @@ class MasterSocket:
         for fid in self.should_remove_fids:
             # Now close the correspond socket fids.
             c = self.client_pool.pop(fid, None)
+
+            # The fid is manager. Set the manager as NULL.
+            if self.manager_client is not None:
+                if fid == self.manager_client.fid:
+                    self.manager_client = None
+
             try:
                 # Maybe the socket be closed. Should
                 # catch the exception error.
                 c["socket"].close()
             except:
                 pass
-
-            # The fid is manager. Set the manager as NULL.
-            if self.manager_client is not None:
-                if fid == self.manager_client.fid:
-                    self.manager_client = None
         self.should_remove_fids.clear()
 
 
