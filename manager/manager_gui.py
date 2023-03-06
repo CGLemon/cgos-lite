@@ -5,6 +5,7 @@ import select
 import sys
 import queue
 import time
+import traceback
 import tkinter as tk
 
 SERVER_PORT = 1919
@@ -101,6 +102,21 @@ class ServerSocket:
         else:
             self.send("{}".format(json.dumps(queries, indent=None, separators=(',', ':'))))
 
+    def send_match(self,
+                   black_fid,
+                   white_fid,
+                   board_size,
+                   komi,
+                   main_time):
+        match = "match fid {} {} bsize {} komi {} mtime {}".format(
+            black_fid,
+            white_fid,
+            board_size,
+            komi,
+            main_time
+        )
+        self.handle_command("command {}".format(match))
+
     def get_client_status(self):
         self.handle_command("client_status")
         out = self.client_status_queue.get(block=True, timeout=9999)
@@ -165,42 +181,187 @@ class ManagerGUI:
         self.root.mainloop()
 
     def try_login(self):
-         p = self.password_entry.get()
-         print(p)
-
-         self.server = ServerSocket(MANAGER_NAME, MANAGER_PASSWORD)
+         self.server = ServerSocket(MANAGER_NAME, self.password_ety.get())
          self.main_layout() 
 
     def login_layout(self):
         self.clear_frame()
-        self.password_lable = tk.Label(self.root, text="Password:")
-        self.password_entry = tk.Entry(self.root)
-        self.password_lable.grid(row=0, column=0, padx=10, pady=10)
-        self.password_entry.grid(row=0, column=1, padx=10, pady=10)
+        self.password_lb = tk.Label(self.root, text="Password:", justify=tk.CENTER)
+        self.password_ety = tk.Entry(self.root, justify=tk.CENTER)
+        self.password_ety.insert(0, "{}".format(MANAGER_PASSWORD))
+        self.password_lb.grid(row=0, column=0, padx=10, pady=10)
+        self.password_ety.grid(row=0, column=1, padx=10, pady=10)
 
-        self.login_button = tk.Button(
+        self.login_btn = tk.Button(
             self.root, text="Login", command=self.try_login)
-        self.login_button.grid(row=1, column=0, padx=10, pady=10)
+        self.login_btn.grid(row=1, column=0, padx=10, pady=10)
 
     def main_layout(self):
         self.clear_frame()
-        self.root.geometry("800x600")
+        self.root.geometry("600x400")
 
-        self.clients_listbox = tk.Listbox(self.root)
-        self.clients_listbox.pack(
+        self.clients_lb = tk.Listbox(self.root)
+        self.clients_lb.pack(
             side="left", fill='y', padx=10, pady=10)
 
-        self.update_baisc()
+        self.label_size = 15
+        self.entry_size = 20
+        self.default_bz = 9
+        self.default_komi = 7
+        self.default_main_time = 900
+ 
+        self.blk_frame = tk.Frame(self.root)
+        self.blk_frame.pack(pady=10)
+        self.blk_lb = tk.Label(
+            self.blk_frame, text="black fid",
+            width=self.label_size, justify=tk.CENTER)
+        self.blk_lb.grid(row=0, column=0)
+        self.blk_ety = tk.Entry(
+            self.blk_frame, width=self.entry_size, justify=tk.CENTER)
+        self.blk_ety.grid(row=0, column=1, padx=10)
 
-    def update_baisc(self):
-        client_status = self.server.get_client_status()
+        self.wht_frame = tk.Frame(self.root)
+        self.wht_frame.pack(pady=10)
+        self.wht_lb = tk.Label(
+            self.wht_frame, text="white fid",
+            width=self.label_size, justify=tk.CENTER)
+        self.wht_lb.grid(row=0, column=0)
+        self.wht_ety = tk.Entry(
+            self.wht_frame, justify=tk.CENTER, width=self.entry_size)
+        self.wht_ety.grid(row=0, column=1, padx=10)
 
-        self.clients_listbox.delete(0, tk.END)
-        for v, k in client_status.items():
-            where = "0" if k[1] == "manager" else tk.END
-            prefix = " * " if k[1] == "manager" else "   "
+        self.bz_frame = tk.Frame(self.root)
+        self.bz_frame.pack(pady=10)
+        self.bz_lb = tk.Label(
+            self.bz_frame, text="board size",
+            width=self.label_size, justify=tk.CENTER)
+        self.bz_lb.grid(row=0, column=0)
+        self.bz_ety = tk.Entry(
+            self.bz_frame, width=self.entry_size, justify=tk.CENTER)
+        self.bz_ety.insert(0, "{}".format(self.default_bz))
+        self.bz_ety.grid(row=0, column=1, padx=10)
 
-            self.clients_listbox.insert(
+        self.komi_frame = tk.Frame(self.root)
+        self.komi_frame.pack(pady=10)
+        self.komi_lb = tk.Label(
+            self.komi_frame, text="komi",
+            width=self.label_size, justify=tk.CENTER)
+        self.komi_lb.grid(row=0, column=0)
+        self.komi_ety = tk.Entry(
+            self.komi_frame, width=self.entry_size, justify=tk.CENTER)
+        self.komi_ety.insert(0, "{}".format(self.default_komi))
+        self.komi_ety.grid(row=0, column=1, padx=10)
+
+        self.mt_frame = tk.Frame(self.root)
+        self.mt_frame.pack(pady=10)
+        self.mt_lb = tk.Label(
+            self.mt_frame, text="main time",
+            width=self.label_size, justify=tk.CENTER)
+        self.mt_lb.grid(row=0, column=0)
+        self.mt_ety = tk.Entry(
+            self.mt_frame, width=self.entry_size, justify=tk.CENTER)
+        self.mt_ety.insert(0, "{}".format(self.default_main_time))
+        self.mt_ety.grid(row=0, column=1, padx=10)
+
+        self.match_btn = tk.Button(
+            self.root,
+            text="Match",
+            width=20,
+            command=self.do_match)
+        self.match_btn.pack(pady=10)
+
+        # self.refresh_btn = tk.Button(
+        #     self.root,
+        #     text="Refresh",
+        #     width=20,
+        #     command=self.update_clients)
+        # self.refresh_btn.pack(pady=10)
+
+        self.update_clients()
+
+    def do_match(self):
+        def is_int(v):
+            try:
+                int(v)
+            except:
+                return False
+            return True
+        def is_float(v):
+            try:
+                float(v)
+            except:
+                return False
+            return True
+
+        def check_player_valid(client_status, fid):
+            if client_status.get(str(fid), None) is None:
+                return False
+            if client_status[str(fid)] == "playing":
+                return False
+            return True
+
+        b = self.blk_ety.get()
+        w = self.wht_ety.get()
+        bz = self.bz_ety.get()
+        k = self.komi_ety.get()
+        mt = self.mt_ety.get()
+
+        if is_int(b):
+            black_fid = int(b)
+        else:
+            print("The black fid is not integer.")
+            return
+
+        if is_int(w):
+           white_fid = int(w)
+        else:
+            print("The white fid is not integer.")
+            return
+
+        if is_int(bz):
+            board_size = int(bz)
+        else:
+            print("The board size is not integer.")
+            return
+
+        if is_float(k):
+            komi = float(k)
+        else:
+            print("The komi is not float.")
+            return
+
+        if is_int(mt):
+            main_time = int(mt)
+        else:
+            print("The main time is not integer.")
+            return
+
+        if not check_player_valid(self.client_status, black_fid):
+            print("It is invalid black player.")
+            return
+
+        if not check_player_valid(self.client_status, white_fid):
+            print("It is invalid white player.")
+            return
+
+        self.blk_ety.delete(0, tk.END)
+        self.wht_ety.delete(0, tk.END)
+        self.server.send_match(
+            black_fid,
+            white_fid,
+            board_size,
+            komi,
+            main_time)
+
+    def update_clients(self):
+        self.client_status = self.server.get_client_status()
+
+        self.clients_lb.delete(0, tk.END)
+        for v, k in self.client_status.items():
+            where = 0 if k[1] == "manager" else tk.END
+            prefix = " * " if k[1] == "manager" else \
+                         " x " if k[2] == "playing" else "   "
+            self.clients_lb.insert(
                 where,
                 "{}{} ({})".format(
                     prefix,
@@ -208,7 +369,7 @@ class ManagerGUI:
                     v     # fid
                 )
             )
-        self.root.after(2000, self.update_baisc)
+        self.root.after(1000, self.update_clients)
 
     def clear_frame(self):
         for widgets in self.root.winfo_children():
@@ -219,7 +380,8 @@ class ManagerGUI:
             self.server.abort()
 
 if __name__ == "__main__":
-    m = ManagerGUI()
-
-# command show client
-# command match random
+    try:
+        m = ManagerGUI()
+    except:
+        traceback.print_exc()
+        sys.exit(1)

@@ -467,6 +467,8 @@ class MasterSocket:
 
                 for name in ["black", "white"]:
                     fid = task[name].fid
+                    if self.client_pool[fid]["socket"].type != "engine":
+                        return
                     self.client_pool[fid]["status"] = "playing"
                     self.client_pool[fid]["gid"] = task["gid"]
                     self.client_pool[fid]["pid"] = task["pid"]
