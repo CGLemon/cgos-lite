@@ -120,11 +120,12 @@ class MasterSocket:
                 outputs = dict()
                 for kk, vv in self.client_pool.items():
                     # The 'kk' is fid. 
-                    outputs[kk] = [
-                        "{}".format(vv["socket"].name), # name
-                        "{}".format(vv["socket"].type), # type
-                        "{}".format(vv["status"])       # status
-                    ]
+                    outputs[kk] = {
+                        "name"   : "{}".format(vv["socket"].name),
+                        "type"   : "{}".format(vv["socket"].type),
+                        "status" : "{}".format(vv["status"]),
+                        "gid"    : "{}".format(vv["gid"])
+                    }
                 outputs = json.dumps(outputs, indent=None, separators=(',', ':'))
                 self.manager_client.request_client_status(outputs)
             elif k == "command":

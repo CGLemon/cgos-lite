@@ -8,9 +8,9 @@ import time
 import traceback
 import tkinter as tk
 
-SERVER_PORT = 1919
 MANAGER_NAME = "manager"
 MANAGER_PASSWORD = "a123456789"
+SERVER_PORT = 1919
 
 class ServerSocketError(Exception):
     def __init__(self, who, msg):
@@ -22,10 +22,10 @@ class ServerSocketError(Exception):
         return repr(self.msg)
 
 class ServerSocket:
-    def __init__(self, name, password):
+    def __init__(self, name, password, port):
         self._sock_file = None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((socket.gethostname(), SERVER_PORT))
+        self.sock.connect((socket.gethostname(), port))
         self.name = name
         self.password = password
         self.running = True
@@ -101,6 +101,9 @@ class ServerSocket:
             self.send("")
         else:
             self.send("{}".format(json.dumps(queries, indent=None, separators=(',', ':'))))
+
+    def send_command(self, cmd):
+        self.handle_command("command {}".format(cmd))
 
     def send_match(self,
                    black_fid,
@@ -181,20 +184,44 @@ class ManagerGUI:
         self.root.mainloop()
 
     def try_login(self):
-         self.server = ServerSocket(MANAGER_NAME, self.password_ety.get())
+         port = int(self.port_ety.get())
+         password = self.password_ety.get()
+         self.server = ServerSocket(
+             MANAGER_NAME, self.password_ety.get(), port)
          self.main_layout() 
 
     def login_layout(self):
         self.clear_frame()
-        self.password_lb = tk.Label(self.root, text="Password:", justify=tk.CENTER)
-        self.password_ety = tk.Entry(self.root, justify=tk.CENTER)
+        self.root.geometry("400x150")
+
+        self.label_size = 12
+        self.entry_size = 20
+
+        self.port_frame = tk.Frame(self.root)
+        self.port_frame.pack(pady=10)
+        self.port_lb = tk.Label(
+            self.port_frame, text="port",
+            width=self.label_size, justify=tk.CENTER)
+        self.port_lb.grid(row=0, column=0)
+        self.port_ety = tk.Entry(
+            self.port_frame, width=self.entry_size, justify=tk.CENTER)
+        self.port_ety.insert(0, "{}".format(SERVER_PORT))
+        self.port_ety.grid(row=0, column=1)
+
+        self.password_frame = tk.Frame(self.root)
+        self.password_frame.pack(pady=10)
+        self.password_lb = tk.Label(
+            self.password_frame, text="password",
+            width=self.label_size, justify=tk.CENTER)
+        self.password_lb.grid(row=0, column=0)
+        self.password_ety = tk.Entry(
+            self.password_frame, width=self.entry_size, justify=tk.CENTER)
         self.password_ety.insert(0, "{}".format(MANAGER_PASSWORD))
-        self.password_lb.grid(row=0, column=0, padx=10, pady=10)
-        self.password_ety.grid(row=0, column=1, padx=10, pady=10)
+        self.password_ety.grid(row=0, column=1)
 
         self.login_btn = tk.Button(
             self.root, text="Login", command=self.try_login)
-        self.login_btn.grid(row=1, column=0, padx=10, pady=10)
+        self.login_btn.pack(pady=10)
 
     def main_layout(self):
         self.clear_frame()
@@ -277,6 +304,17 @@ class ManagerGUI:
         #     command=self.update_clients)
         # self.refresh_btn.pack(pady=10)
 
+        self.cmd_ety = tk.Entry(
+            self.root, width=2*self.entry_size, justify=tk.CENTER)
+        self.cmd_ety.pack(pady=10)
+
+        self.cmd_btn = tk.Button(
+            self.root,
+            text="Send",
+            width=20,
+            command=self.send_command)
+        self.cmd_btn.pack(pady=10)
+
         self.update_clients()
 
     def do_match(self):
@@ -353,20 +391,26 @@ class ManagerGUI:
             komi,
             main_time)
 
+    def send_command(self):
+        c = self.cmd_ety.get()
+        self.cmd_ety.delete(0, tk.END)
+        self.server.send_command(c)
+
     def update_clients(self):
         self.client_status = self.server.get_client_status()
-
         self.clients_lb.delete(0, tk.END)
+
         for v, k in self.client_status.items():
-            where = 0 if k[1] == "manager" else tk.END
-            prefix = " * " if k[1] == "manager" else \
-                         " x " if k[2] == "playing" else "   "
+            where = 0 if k["type"] == "manager" else tk.END
+            prefix = " * " if k["type"] == "manager" else \
+                         "({}) ".format(k["gid"]) \
+                             if k["status"] == "playing" else "   "
             self.clients_lb.insert(
                 where,
                 "{}{} ({})".format(
                     prefix,
-                    k[0], # name
-                    v     # fid
+                    k["name"], # name
+                    v          # fid
                 )
             )
         self.root.after(1000, self.update_clients)
