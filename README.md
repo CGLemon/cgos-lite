@@ -5,6 +5,7 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
 ## Requirements
 
 * python 3.x or above
+* tkinter (GUI only)
 
 ## Run the Server
 
@@ -25,6 +26,7 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
         * ```sgf```: The source of SGF name, starting the match  from it.
         * The sample is like ```match fid 1 2 mtime 900 bsize 19 komi 7.5```.
 * ```file [filename]```: Read the batched commands from file.
+* ```close (fids)```: close some specific clients.
 
 ## Configure
 
@@ -37,10 +39,15 @@ Set these values in the ```config.py```
 * ```DEFAULT_KOMI``` : The default komi if we do not specify a value in the match.
 * ```SGF_DIR_PATH``` : Will save the SGF files under this path.
 
+## GUI
+
+The manager can control the on the remote device.
+
+    python3 mananger_gui.py
+
 ## TODO
 
 * Support the Jappenese rule.
-* GUI for the user.
 
 ## LICENSE
 

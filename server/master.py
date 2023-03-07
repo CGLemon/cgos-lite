@@ -226,6 +226,8 @@ class MasterSocket:
         for fid in self.should_remove_fids:
             # Now close the correspond socket fids.
             c = self.client_pool.pop(fid, None)
+            if c is None:
+                continue
 
             # The fid is manager. Set the manager as NULL.
             if self.manager_client is not None:
@@ -279,7 +281,7 @@ class MasterSocket:
             # before it.
             sys.exit(1)
         elif cmd_list["main"] == "close":
-            # Close a socket via fids.
+            # Close the sockets via fids.
             i = 0
             for c in cmd_list_raw:
                 if i >= 1:
@@ -288,6 +290,7 @@ class MasterSocket:
                         self.should_remove_fids.add(fid)
                     except:
                         continue
+                i += 1
         elif cmd_list["main"] == "file":
             # Read the batched commands from file. one line
             # should be one command. For example,
