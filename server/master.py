@@ -102,6 +102,8 @@ class MasterSocket:
         return logger
 
     def fill_waiting_clients(self):
+        # Gather the waiting clients for pool and fill
+        # it into 'waiting_clients'.
         self.waiting_clients.clear()
         for k, v in self.client_pool.items():
             if v["socket"].type == "engine" and \
@@ -109,6 +111,8 @@ class MasterSocket:
                 self.waiting_clients.add(k)
 
     def parse_queries(self, raw_queries, commands_queue):
+        # Parse the queries from manager. The master (server)
+        # will do the queries.
         if self.manager_client is None:
             return
         if len(raw_queries) == 0:
@@ -117,6 +121,7 @@ class MasterSocket:
         queries = json.loads(raw_queries)
         for k, v in queries.items():
             if k == "client_status":
+                # Return the status of clients to manager.
                 outputs = dict()
                 for kk, vv in self.client_pool.items():
                     # The 'kk' is fid. 
@@ -129,9 +134,11 @@ class MasterSocket:
                 outputs = json.dumps(outputs, indent=None, separators=(',', ':'))
                 self.manager_client.request_client_status(outputs)
             elif k == "command":
+                # 'v' is command. See the 'handle_command()' section.
                 command = v
                 commands_queue.append(command)
             else:
+                # Unknown query.
                 pass
 
     def handle_manager(self, commands_queue):
@@ -139,6 +146,8 @@ class MasterSocket:
             return
 
         try:
+            # Because the manager is lazy client, we need
+            # to request the manager for queries. 
             self.manager_client.create_sockfile()
             self.parse_queries(
                 self.manager_client.request_queries(),
@@ -146,6 +155,7 @@ class MasterSocket:
             )
             self.manager_client.close_sockfile()
         except ClientSocketError as e:
+            # Manager is closed
             pass
 
     def handle_clients(self):
@@ -380,6 +390,8 @@ class MasterSocket:
                 #     mtime: the game main time in second
                 #       sgf: the source of sgf name, starting the match
                 #            from it
+                #     store: the directory path. Will store the the game
+                #            game 
                 #
                 # The format samples are here.
                 #     match fid 1 2
@@ -413,6 +425,8 @@ class MasterSocket:
                                 task["komi"] = float(c) # get komi
                             elif field == "sgf":
                                 task["sgf"] = c
+                            elif field == "store":
+                                task["store"] = c
                             field = None # clean the field
                     i += 1
             else:
@@ -427,7 +441,7 @@ class MasterSocket:
         try:
             # Collect the finished clients from queue. Reset the
             # clients status to waiting.
-            task = self.finished_queue.get(block=True, timeout=0.1)
+            task = self.finished_queue.get(block=True, timeout=0)
             black, white, pid, gid = task["black"], task["white"], task["pid"], task["gid"]
 
             # The task is finished. Reduce the load.
@@ -455,7 +469,7 @@ class MasterSocket:
             if task.get("black", None) is not None and \
                    task.get("white", None) is not None:
                 # Select the lowest load process in order to
-                # load balancing.
+                # be load balancing.
                 min_load = self.process_pool[0]["load"]
                 select_pid = self.process_pool[0]["pid"]
                 for p in self.process_pool:

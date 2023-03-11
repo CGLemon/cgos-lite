@@ -1,12 +1,14 @@
 import traceback
 import sys
 import select
+import time
 from master import MasterSocket
 
 def master_loop():
     # Master will initialize all basic status.
     master = MasterSocket()
     commands_queue = list()
+    sleeping_time = 0.2
 
     # The main loop is running.
     try:
@@ -26,6 +28,10 @@ def master_loop():
 
             # 4th. Check the finished clients.
             master.handle_finished_clients()
+
+            # Sleep some time in order to avoid
+            # busy waiting.
+            time.sleep(sleeping_time)
     finally:
         master.close()
 

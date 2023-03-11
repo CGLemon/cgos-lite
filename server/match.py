@@ -69,7 +69,7 @@ def play_match_game(game_id, black, white, setting):
 
     sgf_clock_time = time.time()
     sgf_name = "{}_{}(B)_{}(W)_g{}.sgf".format(date, black.name, white.name, game_id)
-    sgf_path = os.path.join(*config.SGF_DIR_PATH)
+    store_path = setting["store"]
     move_history = list() # It contains (move, time_left and analysis).
 
     # Try to read the SGF file. Should start the game from
@@ -180,7 +180,7 @@ def play_match_game(game_id, black, white, setting):
             # the move_history. Failed to save it if the client play
             # the move too quick. 
             if time.time() - sgf_clock_time > 5:
-                if os.path.isdir(sgf_path):
+                if os.path.isdir(store_path):
                     sgf = make_sgf(
                               board.board_size,
                               board.komi,
@@ -191,7 +191,7 @@ def play_match_game(game_id, black, white, setting):
                               move_history,
                               None
                           )
-                    with open(os.path.join(sgf_path, sgf_name), 'w') as f:
+                    with open(os.path.join(store_path, sgf_name), 'w') as f:
                         f.write(sgf)
                     sgf_clock_time = time.time()
 
@@ -251,7 +251,7 @@ def play_match_game(game_id, black, white, setting):
             pass
 
     # Always save the SGF file before leaving.
-    if os.path.isdir(sgf_path):
+    if os.path.isdir(store_path):
         sgf = make_sgf(
                   board.board_size,
                   board.komi,
@@ -262,7 +262,7 @@ def play_match_game(game_id, black, white, setting):
                   move_history,
                   result
               )
-        with open(os.path.join(sgf_path, sgf_name), 'w') as f:
+        with open(os.path.join(store_path, sgf_name), 'w') as f:
             f.write(sgf)
 
 def match_loop(process_id, ready_queue, finished_queue):
@@ -309,7 +309,8 @@ def match_loop(process_id, ready_queue, finished_queue):
             "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
             "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
             "komi"       : task.get("komi", config.DEFAULT_KOMI),
-            "sgf"        : task.get("sgf", None)
+            "sgf"        : task.get("sgf", None),
+            "store"      : task.get("store", os.path.join(*config.SGF_DIR_PATH))
         }
 
         # New game is starting. Each threads hold one game. The threads

@@ -58,24 +58,28 @@ class ServerSocket:
         self.loop.join()
 
     def receive_loop(self):
-        self.create_sockfile()
-        while self.running:
-            msg = self.receive()
-            if len(msg) == 0:
-                time.sleep(1)
-                continue
-            msg_list = msg.split()
-            if msg_list[0] == "protocol":
-                self.handle_protocol()
-            elif msg_list[0] == "username":
-                self.handle_username()
-            elif msg_list[0] == "password":
-                self.handle_password()
-            elif msg_list[0] == "client_status":
-                self.handle_client_status(msg)
-            elif msg_list[0] == "queries":
-                self.handle_queries()
-        self.close()
+        try:
+            self.create_sockfile()
+            while self.running:
+                msg = self.receive()
+                if len(msg) == 0:
+                    time.sleep(1)
+                    continue
+                msg_list = msg.split()
+                if msg_list[0] == "protocol":
+                    self.handle_protocol()
+                elif msg_list[0] == "username":
+                    self.handle_username()
+                elif msg_list[0] == "password":
+                    self.handle_password()
+                elif msg_list[0] == "client_status":
+                    self.handle_client_status(msg)
+                elif msg_list[0] == "queries":
+                    self.handle_queries()
+            self.close()
+        except:
+            pass
+
 
     def handle_protocol(self):
         self.send("m1")
@@ -110,7 +114,9 @@ class ServerSocket:
                    white_fid,
                    board_size,
                    komi,
-                   main_time):
+                   main_time,
+                   sgf_source,
+                   store_path):
         match = "match fid {} {} bsize {} komi {} mtime {}".format(
             black_fid,
             white_fid,
@@ -118,6 +124,10 @@ class ServerSocket:
             komi,
             main_time
         )
+        if sgf_source is not None:
+            match += " sgf {}".format(sgf_source)
+        if store_path is not None:
+            match += " store {}".format(store_path)
         self.handle_command("command {}".format(match))
 
     def get_client_status(self):
@@ -225,7 +235,7 @@ class ManagerGUI:
 
     def main_layout(self):
         self.clear_frame()
-        self.root.geometry("600x400")
+        self.root.geometry("600x450")
 
         self.clients_lb = tk.Listbox(self.root)
         self.clients_lb.pack(
@@ -290,6 +300,16 @@ class ManagerGUI:
         self.mt_ety.insert(0, "{}".format(self.default_main_time))
         self.mt_ety.grid(row=0, column=1, padx=10)
 
+        self.store_frame = tk.Frame(self.root)
+        self.store_frame.pack(pady=10)
+        self.store_lb = tk.Label(
+            self.store_frame, text="store path",
+            width=self.label_size, justify=tk.CENTER)
+        self.store_lb.grid(row=0, column=0)
+        self.store_ety = tk.Entry(
+            self.store_frame, width=self.entry_size, justify=tk.CENTER)
+        self.store_ety.grid(row=0, column=1, padx=10)
+
         self.match_btn = tk.Button(
             self.root,
             text="Match",
@@ -343,6 +363,7 @@ class ManagerGUI:
         bz = self.bz_ety.get()
         k = self.komi_ety.get()
         mt = self.mt_ety.get()
+        st = self.store_ety.get()
 
         if is_int(b):
             black_fid = int(b)
@@ -374,13 +395,18 @@ class ManagerGUI:
             print("The main time is not integer.")
             return
 
-        if not check_player_valid(self.client_status, black_fid):
-            print("It is invalid black player.")
-            return
+        # if not check_player_valid(self.client_status, black_fid):
+        #     print("It is invalid black player.")
+        #     return
 
-        if not check_player_valid(self.client_status, white_fid):
-            print("It is invalid white player.")
-            return
+        # if not check_player_valid(self.client_status, white_fid):
+        #     print("It is invalid white player.")
+         #    return
+
+        if len(st) == 0:
+            store_path = None
+        else:
+            store_path = st
 
         self.blk_ety.delete(0, tk.END)
         self.wht_ety.delete(0, tk.END)
@@ -389,7 +415,9 @@ class ManagerGUI:
             white_fid,
             board_size,
             komi,
-            main_time)
+            main_time,
+            None,
+            store_path)
 
     def send_command(self):
         c = self.cmd_ety.get()
