@@ -115,14 +115,16 @@ class ServerSocket:
                    board_size,
                    komi,
                    main_time,
+                   rule,
                    sgf_source,
                    store_path):
-        match = "match fid {} {} bsize {} komi {} mtime {}".format(
+        match = "match fid {} {} bsize {} komi {} mtime {} rule {}".format(
             black_fid,
             white_fid,
             board_size,
             komi,
-            main_time
+            main_time,
+            rule
         )
         if sgf_source is not None:
             match += " sgf {}".format(sgf_source)
@@ -310,6 +312,20 @@ class ManagerGUI:
             self.store_frame, width=self.entry_size, justify=tk.CENTER)
         self.store_ety.grid(row=0, column=1, padx=10)
 
+
+        self.rule_frame = tk.Frame(self.root)
+        self.rule_frame.pack(pady=10)
+        self.rule_lb = tk.Label(
+            self.rule_frame, text="rule",
+            width=self.label_size, justify=tk.CENTER)
+        self.rule_lb.grid(row=0, column=0)
+        self.rule_lb = tk.Listbox(
+            self.rule_frame, height=1,
+            width=self.entry_size, justify=tk.CENTER)
+        self.rule_lb.grid(row=0, column=1, padx=10)
+        for r in ["chinese-like", "null"]:
+            self.rule_lb.insert(tk.END, r)
+
         self.match_btn = tk.Button(
             self.root,
             text="Match",
@@ -401,12 +417,14 @@ class ManagerGUI:
 
         # if not check_player_valid(self.client_status, white_fid):
         #     print("It is invalid white player.")
-         #    return
+        #     return
 
         if len(st) == 0:
             store_path = None
         else:
             store_path = st
+
+        rule = self.rule_lb.get(self.rule_lb.nearest(0))
 
         self.blk_ety.delete(0, tk.END)
         self.wht_ety.delete(0, tk.END)
@@ -416,6 +434,7 @@ class ManagerGUI:
             board_size,
             komi,
             main_time,
+            rule,
             None,
             store_path)
 

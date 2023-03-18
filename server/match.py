@@ -64,6 +64,10 @@ def play_match_game(game_id, black, white, setting):
         brd.WHITE : white
     }
 
+    # TODO: Add support for Chinese rule and Japanese rule.
+    rule = setting["rule"]
+    should_superko = rule == "chinese-like"
+
     # We record the starting time in the date.
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -164,7 +168,9 @@ def play_match_game(game_id, black, white, setting):
 
             is_legal = board.play(vertex)
 
-            if not is_legal or (vertex != brd.PASS and board.superko()):
+            if not is_legal or \
+                (vertex != brd.PASS and \
+                     not should_superko and board.superko()):
                 # Game ended by illegal move.
                 winner = opp_to_move
                 result_status["winner"] = winner
@@ -205,8 +211,19 @@ def play_match_game(game_id, black, white, setting):
             )
 
             if board.num_passes >= 2:
-                # Game ended by double pass.
-                black_score = board.final_score()
+                # Game ended by double pass. Now score
+                # the final position.
+
+                if rule == "chinese-like":
+                    result_status["type"] = "double pass"
+                    black_score = board.final_score()
+                elif rule == "null":
+                    result_status["type"] = "no rule"
+                    black_score = 0
+                else:
+                    # Invalid rules.
+                    result_status["type"] = "invalid rule"
+                    black_score = 0
 
                 if black_score > 0.001:
                     winner = brd.BLACK
@@ -215,7 +232,6 @@ def play_match_game(game_id, black, white, setting):
                 else:
                     winner = brd.EMPTY
                 result_status["winner"] = winner
-                result_status["type"] = "double pass"
 
                 if winner == brd.EMPTY:
                     result_status["info"] = "0"
@@ -310,7 +326,8 @@ def match_loop(process_id, ready_queue, finished_queue):
             "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
             "komi"       : task.get("komi", config.DEFAULT_KOMI),
             "sgf"        : task.get("sgf", None),
-            "store"      : task.get("store", os.path.join(*config.SGF_DIR_PATH))
+            "store"      : task.get("store", os.path.join(*config.SGF_DIR_PATH)),
+            "rule"       : task.get("rule", "chinese-like")
         }
 
         # New game is starting. Each threads hold one game. The threads

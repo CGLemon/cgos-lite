@@ -391,12 +391,14 @@ class MasterSocket:
                 #       sgf: the source of sgf name, starting the match
                 #            from it
                 #     store: the directory path. Will store the the game
-                #            game 
+                #            game
+                #      rule: support 'null', 'chinese-like' keys
                 #
                 # The format samples are here.
                 #     match fid 1 2
                 #     match fid 1 2 bsize 17
                 #     match fid 1 2 mtime 900 bsize 19 komi 7.5
+                #     match fid 1 2 rule chinese-like
 
                 i = 0
                 field = None
@@ -427,6 +429,8 @@ class MasterSocket:
                                 task["sgf"] = c
                             elif field == "store":
                                 task["store"] = c
+                            elif field == "rule":
+                                task["rule"] = c
                             field = None # clean the field
                     i += 1
             else:
