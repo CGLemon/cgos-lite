@@ -11,6 +11,7 @@ import multiprocessing as mp
 import config
 from match import match_loop
 from client import ClientSocket, ClientSocketError
+from utils import check_and_mkdir
 
 class MasterSocket:
     def __init__(self):
@@ -48,11 +49,12 @@ class MasterSocket:
                           sys.stdout
                       )
 
-        # Make the SGF files directory. We will save
-        # the match games here.
-        sgf_path = os.path.join(*config.SGF_DIR_PATH)
-        if not os.path.isdir(sgf_path):
-            os.mkdir(sgf_path)
+        # Make the SGF and HTML root directories. We will save
+        # all match games under them.
+        self.sgf_root = os.path.join(*config.SGF_DIR_ROOT)
+        check_and_mkdir(self.sgf_root)
+        self.html_root = os.path.join(*config.HTML_DIR_ROOT)
+        check_and_mkdir(self.html_root)
 
         # Allocate the process(s).
         num_workers = config.NUM_WORKERS
@@ -482,6 +484,19 @@ class MasterSocket:
                         select_pid = p["pid"]
                 task["pid"] = select_pid
                 self.process_pool[select_pid]["load"] += 1
+
+                # Make the store directory before pushing the
+                # task. Ensure that there is only one process
+                # does mkdir.
+                store = task.get("store", None)
+                if store is None:
+                    sgf_check_path = os.path.join(self.sgf_root, config.DEFAULT_STORE_DIR)
+                    html_check_path = os.path.join(self.html_root, config.DEFAULT_STORE_DIR)
+                else:
+                    sgf_check_path = os.path.join(self.sgf_root, store)
+                    html_check_path = os.path.join(self.html_root, store)
+                check_and_mkdir(sgf_check_path)
+                check_and_mkdir(html_check_path)
 
                 # The current setting is valid. Push the task
                 # to ready queue.

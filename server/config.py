@@ -8,6 +8,12 @@ DEFAULT_BOARD_SIZE = 9
 
 DEFAULT_KOMI = 7
 
-SGF_DIR_PATH = [".", "sgfs"]
+DEFAULT_STORE_DIR = "default"
+
+WGO_PATH = None
+
+SGF_DIR_ROOT = [".", "sgfs"]
+
+HTML_DIR_ROOT = [".", "html"]
 
 MANAGER_PASSWORD = "a123456789"

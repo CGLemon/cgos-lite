@@ -9,6 +9,7 @@ import os
 import board as brd
 from sgf import make_sgf, parse_sgf
 from client import ClientSocketError
+from utils import check_and_mkdir, get_html_code
 
 def color_to_char(c):
     if c == brd.BLACK:
@@ -48,6 +49,51 @@ def move_to_vertex(board, move, support_analysis):
         vertex = board.get_vertex(x,y)
     return move, vertex, analysis
 
+def write_sgf_and_html(
+    setting,
+    names,
+    date,
+    move_history,
+    result,
+    base_name
+):
+    black_name, white_name = names
+    sgf_store_path = os.path.join(*config.SGF_DIR_ROOT, setting["store"])
+
+    if os.path.isdir(sgf_store_path):
+        sgf_name = "{}.sgf".format(base_name)
+        sgf = make_sgf(
+                  setting["board_size"],
+                  setting["komi"],
+                  black_name,
+                  white_name,
+                  setting["main_time"],
+                  date,
+                  move_history,
+                  result
+              )
+        with open(os.path.join(sgf_store_path, sgf_name), 'w') as f:
+            f.write(sgf)
+
+        html_store_path = os.path.join(*config.HTML_DIR_ROOT, setting["store"])
+        if os.path.isdir(html_store_path) and config.WGO_PATH is not None:
+            html_name = "{}.html".format(base_name)
+
+            # Find the absolute SGF file path. We will
+            # write it into HTML. 
+            abs_sgf_name = os.getcwd()
+            for v in sgf_store_path.split(os.sep):
+                if v != ".":
+                    abs_sgf_name = os.path.join(abs_sgf_name, v)
+
+            html_full_name = os.path.join(html_store_path, html_name)
+            if not os.path.isfile(html_full_name):
+                # Only wrtie the HTML file once.
+                with open(html_full_name, 'w') as f:
+                    f.write(get_html_code(config.WGO_PATH, abs_sgf_name))
+        return True
+    return False
+
 def play_match_game(game_id, black, white, setting):
     # Play a match game and save the SGF file. The client may
     # crash here. We detect it and guarantee that the client can
@@ -68,12 +114,16 @@ def play_match_game(game_id, black, white, setting):
     rule = setting["rule"]
     should_superko = rule == "chinese-like"
 
-    # We record the starting time in the date.
+    # We only record the starting time in order to fix
+    # the output file name.
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+    # 
     sgf_clock_time = time.time()
-    sgf_name = "{}_{}(B)_{}(W)_g{}.sgf".format(date, black.name, white.name, game_id)
-    store_path = setting["store"]
+
+    # The store path and SGF name.
+    base_name = "{}_{}(B)_{}(W)_g{}".format(date, black.name, white.name, game_id)
+
     move_history = list() # It contains (move, time_left and analysis).
 
     # Try to read the SGF file. Should start the game from
@@ -186,19 +236,13 @@ def play_match_game(game_id, black, white, setting):
             # the move_history. Failed to save it if the client play
             # the move too quick. 
             if time.time() - sgf_clock_time > 5:
-                if os.path.isdir(store_path):
-                    sgf = make_sgf(
-                              board.board_size,
-                              board.komi,
-                              black.name,
-                              white.name,
-                              setting["main_time"],
-                              date,
-                              move_history,
-                              None
-                          )
-                    with open(os.path.join(store_path, sgf_name), 'w') as f:
-                        f.write(sgf)
+                if write_sgf_and_html(
+                       setting,
+                       (black.name, white.name), 
+                       date,
+                       move_history,
+                       None,
+                       base_name):
                     sgf_clock_time = time.time()
 
             # Request the opponent to play the move.
@@ -267,19 +311,13 @@ def play_match_game(game_id, black, white, setting):
             pass
 
     # Always save the SGF file before leaving.
-    if os.path.isdir(store_path):
-        sgf = make_sgf(
-                  board.board_size,
-                  board.komi,
-                  black.name,
-                  white.name,
-                  setting["main_time"],
-                  date,
-                  move_history,
-                  result
-              )
-        with open(os.path.join(store_path, sgf_name), 'w') as f:
-            f.write(sgf)
+    write_sgf_and_html(
+        setting,
+        (black.name, white.name), 
+        date,
+        move_history,
+        result,
+        base_name):
 
 def match_loop(process_id, ready_queue, finished_queue):
     match_threads = dict()
@@ -326,7 +364,7 @@ def match_loop(process_id, ready_queue, finished_queue):
             "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
             "komi"       : task.get("komi", config.DEFAULT_KOMI),
             "sgf"        : task.get("sgf", None),
-            "store"      : task.get("store", os.path.join(*config.SGF_DIR_PATH)),
+            "store"      : task.get("store", config.DEFAULT_STORE_DIR),
             "rule"       : task.get("rule", "chinese-like")
         }
 
