@@ -37,11 +37,11 @@ Set these values in the ```config.py```
 * ```DEFAULT_MAIN_SECOND``` : The default thinking time if we do not specify a value in the match.
 * ```DEFAULT_BOARD_SIZE``` : The default board size if we do not specify a value in the match.
 * ```DEFAULT_KOMI``` : The default komi if we do not specify a value in the match.
-* ```SGF_DIR_PATH``` : Will save the SGF files under this path.
+* ```DATA_DIR_ROOT``` : Will save the SGF and HTML files under this directory.
 
 ## GUI
 
-The manager can control the on the remote device.
+The manager can control the on the remote device. The password is ```MANAGER_PASSWORD``` in the config file.
 
     python3 mananger_gui.py
 
