@@ -12,8 +12,6 @@ DEFAULT_STORE_DIR = "default"
 
 WGO_PATH = None
 
-SGF_DIR_ROOT = [".", "sgfs"]
-
-HTML_DIR_ROOT = [".", "html"]
+DATA_DIR_ROOT = [".", "data"]
 
 MANAGER_PASSWORD = "a123456789"

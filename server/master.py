@@ -51,9 +51,11 @@ class MasterSocket:
 
         # Make the SGF and HTML root directories. We will save
         # all match games under them.
-        self.sgf_root = os.path.join(*config.SGF_DIR_ROOT)
+        self.data_root = os.path.join(*config.DATA_DIR_ROOT)
+        self.sgf_root = os.path.join(self.data_root, "sgf")
+        self.html_root = os.path.join(self.data_root, "html")
+        check_and_mkdir(self.data_root)
         check_and_mkdir(self.sgf_root)
-        self.html_root = os.path.join(*config.HTML_DIR_ROOT)
         check_and_mkdir(self.html_root)
 
         # Allocate the process(s).
@@ -474,6 +476,13 @@ class MasterSocket:
         if task["type"] == "match":
             if task.get("black", None) is not None and \
                    task.get("white", None) is not None:
+                store = task.get("store", None)
+                if store is not None:
+                    for v in store.split(os.sep):
+                        if v == "." or v == "..":
+                            self.logger.info("Invalid store path {}. Cancel the match.".format(store))
+                            return
+
                 # Select the lowest load process in order to
                 # be load balancing.
                 min_load = self.process_pool[0]["load"]
@@ -488,10 +497,11 @@ class MasterSocket:
                 # Make the store directory before pushing the
                 # task. Ensure that there is only one process
                 # does mkdir.
-                store = task.get("store", None)
                 if store is None:
-                    sgf_check_path = os.path.join(self.sgf_root, config.DEFAULT_STORE_DIR)
-                    html_check_path = os.path.join(self.html_root, config.DEFAULT_STORE_DIR)
+                    sgf_check_path = os.path.join(
+                        self.sgf_root, config.DEFAULT_STORE_DIR)
+                    html_check_path = os.path.join(
+                        self.html_root, config.DEFAULT_STORE_DIR)
                 else:
                     sgf_check_path = os.path.join(self.sgf_root, store)
                     html_check_path = os.path.join(self.html_root, store)

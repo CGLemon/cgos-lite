@@ -58,9 +58,11 @@ def write_sgf_and_html(
     base_name
 ):
     black_name, white_name = names
-    sgf_store_path = os.path.join(*config.SGF_DIR_ROOT, setting["store"])
+    sgf_store_path = os.path.join(
+        *config.DATA_DIR_ROOT, "sgf", setting["store"])
 
     if os.path.isdir(sgf_store_path):
+        # Save the SGF file.
         sgf_name = "{}.sgf".format(base_name)
         sgf = make_sgf(
                   setting["board_size"],
@@ -72,25 +74,36 @@ def write_sgf_and_html(
                   move_history,
                   result
               )
-        with open(os.path.join(sgf_store_path, sgf_name), 'w') as f:
+        sgf_full_name = os.path.join(sgf_store_path, sgf_name)
+        with open(sgf_full_name, 'w') as f:
             f.write(sgf)
 
-        html_store_path = os.path.join(*config.HTML_DIR_ROOT, setting["store"])
+        html_store_path = os.path.join(
+            *config.DATA_DIR_ROOT, "html", setting["store"])
         if os.path.isdir(html_store_path) and config.WGO_PATH is not None:
             html_name = "{}.html".format(base_name)
 
-            # Find the absolute SGF file path. We will
-            # write it into HTML. 
-            abs_sgf_name = os.getcwd()
-            for v in sgf_store_path.split(os.sep):
+            back_count = 0
+            for v in setting["store"].split(os.sep):
+                # Assume there is no ".." symbol.
                 if v != ".":
-                    abs_sgf_name = os.path.join(abs_sgf_name, v)
+                    back_count += 1
+
+            back_path = "."
+            for _ in range(back_count+1):
+                # Back to data directory root.
+                back_path = os.path.join(back_path, "..")
+
+            # Rewrite the WGO and SGF path in the HTML file.
+            sgf_name_in_html = os.path.join(
+                back_path, "sgf", setting["store"], sgf_name)
+            wgo_path_in_html = os.path.join(back_path, config.WGO_PATH)
 
             html_full_name = os.path.join(html_store_path, html_name)
             if not os.path.isfile(html_full_name):
                 # Only wrtie the HTML file once.
                 with open(html_full_name, 'w') as f:
-                    f.write(get_html_code(config.WGO_PATH, abs_sgf_name))
+                    f.write(get_html_code(wgo_path_in_html, sgf_name_in_html))
         return True
     return False
 
@@ -116,13 +129,13 @@ def play_match_game(game_id, black, white, setting):
 
     # We only record the starting time in order to fix
     # the output file name.
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    date = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
 
     # 
     sgf_clock_time = time.time()
 
     # The store path and SGF name.
-    base_name = "{}_{}(B)_{}(W)_g{}".format(date, black.name, white.name, game_id)
+    base_name = "{}-{}(B)-{}(W)-g{}".format(date, black.name, white.name, game_id)
 
     move_history = list() # It contains (move, time_left and analysis).
 
@@ -317,7 +330,7 @@ def play_match_game(game_id, black, white, setting):
         date,
         move_history,
         result,
-        base_name):
+        base_name)
 
 def match_loop(process_id, ready_queue, finished_queue):
     match_threads = dict()
