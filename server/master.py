@@ -39,6 +39,10 @@ class MasterSocket:
         self.last_game_id = 0
         self.should_remove_fids = set()
 
+        # Save the pending fids here. Will pick up one fid
+        # to check every loop epoch.
+        self.should_check_fids = list()
+
         # We can control the master loop by remote manager.
         self.manager_client = None
 
@@ -106,7 +110,7 @@ class MasterSocket:
         return logger
 
     def fill_waiting_clients(self):
-        # Gather the waiting clients for pool and fill
+        # Gather the waiting clients for pool and push
         # it into 'waiting_clients'.
         self.waiting_clients.clear()
         for k, v in self.client_pool.items():
@@ -159,7 +163,8 @@ class MasterSocket:
             )
             self.manager_client.close_sockfile()
         except ClientSocketError as e:
-            # Manager is closed
+            # Manager is closed. Will remove it from pool
+            # later.
             pass
 
     def handle_clients(self):
@@ -172,7 +177,7 @@ class MasterSocket:
         readable, _, err = select.select(read_list, [], read_list, 0.1)
 
         for s in err:
-            # Some mistake in the client. Close it. 
+            # Some errors in the client. Close it. 
             fid = s.fileno()
             c = self.client_pool.get(fid, None)
             if c is not None:
@@ -212,15 +217,23 @@ class MasterSocket:
                             )
                 self.logger.info(outs_info)
 
+        # Check the network connection status. Will
+        # check one client only for each loop epoch.
         self.fill_waiting_clients()
         keys = list(self.waiting_clients)
         if len(keys) >= 1:
-            # TODO: Need a better algorithm to select
-            #       sockets.
-
-            # Check the network connection.
+            # There is at least one waiting client. Pick
+            # up one from queue.
             random.shuffle(keys)
-            check_fid = keys[0]
+            check_fid = None
+            while True:
+                if len(self.should_check_fids) == 0:
+                    self.should_check_fids = keys
+                check_fid = self.should_check_fids.pop(0)
+                if check_fid in keys:
+                    break
+
+            # Check the connection.
             c = self.client_pool.get(check_fid, None)
             if c is not None:
                 c["socket"].create_sockfile()
@@ -396,7 +409,7 @@ class MasterSocket:
                 #            from it
                 #     store: the directory path. Will store the the game
                 #            game
-                #      rule: support 'null', 'chinese-like' keys
+                #      rule: support 'chinese-like' key
                 #
                 # The format samples are here.
                 #     match fid 1 2

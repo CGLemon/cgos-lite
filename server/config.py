@@ -10,7 +10,7 @@ DEFAULT_KOMI = 7
 
 DEFAULT_STORE_DIR = "default"
 
-WGO_PATH = None
+WGO_PATH = "wgo"
 
 DATA_DIR_ROOT = [".", "data"]
 

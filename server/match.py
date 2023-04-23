@@ -274,9 +274,6 @@ def play_match_game(game_id, black, white, setting):
                 if rule == "chinese-like":
                     result_status["type"] = "double pass"
                     black_score = board.final_score()
-                elif rule == "null":
-                    result_status["type"] = "no rule"
-                    black_score = 0
                 else:
                     # Invalid rules.
                     result_status["type"] = "invalid rule"
