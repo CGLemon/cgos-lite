@@ -450,6 +450,13 @@ class MasterSocket:
                                 task["rule"] = c
                             field = None # clean the field
                     i += 1
+            elif cmd_list.get(1, None) == "stop":
+                try:
+                    gid = int(cmd_list.get(2, None))
+                    task["type"] = "stop"
+                    task["gid"] = gid
+                except:
+                    pass
             else:
                 self.logger.info("Unknown parameter.")
 
@@ -546,6 +553,11 @@ class MasterSocket:
                 self.last_game_id += 1
             else:
                 pass
+        elif task["type"] == "stop":
+            gid = task["gid"]
+            running_task = self.game_tasks.get(gid, None) 
+            if running_task is not None:
+                self.ready_queue_pool[running_task["pid"]].put(task)
 
     def close(self):
         try:

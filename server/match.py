@@ -11,6 +11,75 @@ from sgf import make_sgf, parse_sgf
 from client import ClientSocketError
 from utils import check_and_mkdir, get_html_code
 
+# Ref: https://stackoverflow.com/questions/323972/is-there-any-way-to-kill-a-thread
+class ThreadWithExc(threading.Thread):
+    '''A thread class that supports raising an exception in the thread from
+       another thread.
+    '''
+
+    def _async_raise(self, tid, exctype):
+        '''Raises an exception in the threads with id tid'''
+        if not inspect.isclass(exctype):
+            raise TypeError("Only types can be raised (not instances)")
+        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid),
+                                                         ctypes.py_object(exctype))
+        if res == 0:
+            raise ValueError("invalid thread id")
+        elif res != 1:
+            # "if it returns a number greater than one, you're in trouble,
+            # and you should call it again with exc=NULL to revert the effect"
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), None)
+            raise SystemError("PyThreadState_SetAsyncExc failed")
+
+    def _get_my_tid(self):
+        """determines this (self's) thread id
+
+        CAREFUL: this function is executed in the context of the caller
+        thread, to get the identity of the thread represented by this
+        instance.
+        """
+        if not self.isAlive():
+            raise threading.ThreadError("the thread is not active")
+
+        # do we have it cached?
+        if hasattr(self, "_thread_id"):
+            return self._thread_id
+
+        # no, look for it in the _active dict
+        for tid, tobj in threading._active.items():
+            if tobj is self:
+                self._thread_id = tid
+                return tid
+
+        # TODO: in python 2.6, there's a simpler way to do: self.ident
+
+        raise AssertionError("could not determine the thread's id")
+
+    def raise_exc(self, exctype):
+        """Raises the given exception type in the context of this thread.
+
+        If the thread is busy in a system call (time.sleep(),
+        socket.accept(), ...), the exception is simply ignored.
+
+        If you are sure that your exception should terminate the thread,
+        one way to ensure that it works is:
+
+            t = ThreadWithExc( ... )
+            ...
+            t.raiseExc(SomeException)
+            while t.isAlive():
+                time.sleep(0.1)
+                t.raise_exc(SomeException)
+
+        If the exception is to be caught by the thread, you need a way to
+        check that your thread has caught it.
+
+        CAREFUL: this function is executed in the context of the
+        caller thread, to raise an exception in the context of the
+        thread represented by this instance.
+        """
+        self._async_raise(self._get_my_tid(), exctype)
+
 def color_to_char(c):
     if c == brd.BLACK:
         return 'b'
@@ -348,6 +417,7 @@ def match_loop(process_id, ready_queue, finished_queue):
             t.join()
 
             task = {
+                "type"  : "match",
                 "black" : b,
                 "white" : w,
                 "gid"   : i,
@@ -361,29 +431,41 @@ def match_loop(process_id, ready_queue, finished_queue):
                 # Not correct process id. Reture it to finished
                 # queue.
                 finished_queue.put(task)
-            black = task["black"] # black player
-            white = task["white"] # white player
-            game_id = task["gid"] # game id
         except queue.Empty:
             continue
 
-        # TODO: Add support for more task type.
+        if task["type"] == "match":
+            # Create a new match game.
+            setting = {
+                "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
+                "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
+                "komi"       : task.get("komi", config.DEFAULT_KOMI),
+                "sgf"        : task.get("sgf", None),
+                "store"      : task.get("store", config.DEFAULT_STORE_DIR),
+                "rule"       : task.get("rule", "chinese-like")
+            }
 
-        setting = {
-            "main_time"  : task.get("main_time", config.DEFAULT_MAIN_SECOND),
-            "board_size" : task.get("board_size", config.DEFAULT_BOARD_SIZE),
-            "komi"       : task.get("komi", config.DEFAULT_KOMI),
-            "sgf"        : task.get("sgf", None),
-            "store"      : task.get("store", config.DEFAULT_STORE_DIR),
-            "rule"       : task.get("rule", "chinese-like")
-        }
+            black = task["black"] # black player
+            white = task["white"] # white player
+            game_id = task["gid"] # game id
 
-        # New game is starting. Each threads hold one game. The threads
-        # will be released after the gameover.
-        t = threading.Thread(
-                target=play_match_game,
-                args=(game_id, black, white, setting, ),
-                daemon=True
-            )
-        t.start()
-        match_threads[t.ident] = (t, game_id, black, white)
+            # New game is starting. Each threads hold one game. The threads
+            # will be released after the gameover.
+            t = ThreadWithExc(
+                    target=play_match_game,
+                    args=(game_id, black, white, setting, ),
+                    daemon=True
+                )
+            t.start()
+            match_threads[t.ident] = (t, game_id, black, white)
+        elif task["type"] == "stop":
+            # Stop a match game.
+            game_id = task["gid"] # game id
+            for k, v in match_threads.items():
+                # Collect all finished match games.
+                t, gid, _, _ = v
+                if gid != game_id:
+                    continue
+                if t.is_alive():
+                    t.raise_exc(Exception)
+                    break
