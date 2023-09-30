@@ -293,7 +293,7 @@ class MasterSocket:
             # program. We should close all sockets, terminate
             # all processes and do other important things
             # before it.
-            sys.exit(1)
+            sys.exit(0)
         elif cmd_list["main"] == "close":
             # Close the sockets via fids.
             i = 0

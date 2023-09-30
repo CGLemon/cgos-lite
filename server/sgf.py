@@ -76,10 +76,10 @@ def parse_sgf(sgf):
             if len(value) == 0:
                 task["move"] = "pass"
             else:
-                x = value[0].upper()
-                if ord(x) >= ord('I'):
+                x = value[0]
+                if ord(x) >= ord('i'):
                     x = chr(ord(x) + 1)
-                y = ord(value[1]) - ord('a') + 1
+                y = board_size - (ord(value[1]) - ord('a'))
                 task["move"] = "{}{}".format(x,y)
         elif key in ["BL", "WL"]:
             task["time_left"] = int(value)
@@ -148,7 +148,7 @@ def make_sgf(
             ccs = ord(move.lower()[0])
             if ccs > 104:
                 ccs -= 1
-            rrs = int(move[1:]) + ord('a') - 1
+            rrs = (board_size - int(move[1:]) + ord('a'))
             sgf += ";{}[{}{}]{}L[{}]".format(
                        colstr[to_move],
                        chr(ccs),

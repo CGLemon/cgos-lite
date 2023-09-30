@@ -9,7 +9,7 @@ A simplified [CGOS](https://github.com/zakki/cgos) server.
 
 ## Run the Server
 
-    python3 cgos-lite
+    python3 cgos-lite.py
 
 ## Support Commands
 

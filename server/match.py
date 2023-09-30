@@ -311,7 +311,7 @@ def play_match_game(game_id, black, white, setting):
         try:
            # Send the last request to server here in order
            # to check whether the socket is still connected.
-           player.request_gameover(date, result, err)
+           player.request_poll()
         except ClientSocketError as e:
             pass
 
